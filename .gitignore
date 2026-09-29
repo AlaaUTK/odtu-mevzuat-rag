@@ -1,0 +1,25 @@
+# Gizli Çevre Değişkenleri ve Anahtarlar
+.env
+*.env
+
+# Python & Sanal Ortam
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+
+# IDE Yapılandırmaları
+.vscode/
+.idea/
+
+# Veri Tabanı, Docker Kalıntıları ve Cache
+data/chroma_db/
+surrealkv/
+clickhouse_data/
+*.npz
+
+# Streamlit Önbelleği
+.streamlit/secrets.toml

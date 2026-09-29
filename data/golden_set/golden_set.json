@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "question": "Lisans programlarında derslere devam ve sınavlara ilişkin kurallar nelerdir?",
+    "expected_document": "lisans_yonetmeligi.pdf",
+    "expected_article": "MADDE 25"
+  },
+  {
+    "id": 2,
+    "question": "Lisans öğrencilerinin her yarıyıl kayıt yenileme ve danışman onayı işlemleri nasıl yapılır?",
+    "expected_document": "lisans_yonetmeligi.pdf",
+    "expected_article": "MADDE 22"
+  },
+  {
+    "id": 3,
+    "question": "Lisans düzeyinde bir dersten çekilme (withdraw) şartları ve kuralları nelerdir?",
+    "expected_document": "lisans_yonetmeligi.pdf",
+    "expected_article": "MADDE 24"
+  },
+  {
+    "id": 4,
+    "question": "Tezli yüksek lisans programının azami tamamlama süresi kaç yarıyıldır?",
+    "expected_document": "lisansustu_yonetmeligi.pdf",
+    "expected_article": "MADDE 31"
+  },
+  {
+    "id": 5,
+    "question": "Doktora programında yeterlik sınavına ilişkin usul ve esaslar nelerdir?",
+    "expected_document": "lisansustu_yonetmeligi.pdf",
+    "expected_article": "MADDE 42"
+  },
+  {
+    "id": 6,
+    "question": "Lisansüstü tez jürisi kaç üyeden oluşur ve jüri nasıl belirlenir?",
+    "expected_document": "lisansustu_yonetmeligi.pdf",
+    "expected_article": "MADDE 34"
+  },
+  {
+    "id": 7,
+    "question": "Çift Ana Dal (ÇAP) programına başvuru ve kabul şartları ile asgari ortalama nedir?",
+    "expected_document": "cap_yonergesi.pdf",
+    "expected_article": "MADDE 7"
+  },
+  {
+    "id": 8,
+    "question": "ÇAP kontenjanları nasıl belirlenir ve duyurulur?",
+    "expected_document": "cap_yonergesi.pdf",
+    "expected_article": "MADDE 6"
+  },
+  {
+    "id": 9,
+    "question": "ÇAP programından mezuniyet ve diploma alma koşulları nelerdir?",
+    "expected_document": "cap_yonergesi.pdf",
+    "expected_article": "MADDE 14"
+  },
+  {
+    "id": 10,
+    "question": "Yan dal programına başvuru ve kabul koşulları ile asgari genel not ortalaması nedir?",
+    "expected_document": "yan_dal_yonergesi.pdf",
+    "expected_article": "MADDE 7"
+  },
+  {
+    "id": 11,
+    "question": "Yan dal programı kontenjanları nasıl belirlenir?",
+    "expected_document": "yan_dal_yonergesi.pdf",
+    "expected_article": "MADDE 6"
+  },
+  {
+    "id": 12,
+    "question": "Yan dal programını tamamlama ve sertifika alma koşulları nelerdir?",
+    "expected_document": "yan_dal_yonergesi.pdf",
+    "expected_article": "MADDE 15"
+  },
+  {
+    "id": 13,
+    "question": "Yaz okulunda bir öğrenci en fazla kaç ders alabilir?",
+    "expected_document": "yaz_okulu_yonergesi.pdf",
+    "expected_article": "MADDE 8"
+  },
+  {
+    "id": 14,
+    "question": "Başka bir yükseköğretim kurumunun yaz okulundan ders alma koşulları nelerdir?",
+    "expected_document": "yaz_okulu_yonergesi.pdf",
+    "expected_article": "MADDE 10"
+  },
+  {
+    "id": 15,
+    "question": "ODTÜ yurtlarında barınma süresi ve yurtlara kabul esasları nelerdir?",
+    "expected_document": "yurtlar_yonetmeligi.pdf",
+    "expected_article": "MADDE 10"
+  },
+  {
+    "id": 16,
+    "question": "Yurttan kesin çıkarma cezasını gerektiren disiplin suçları nelerdir?",
+    "expected_document": "yurtlar_yonetmeligi.pdf",
+    "expected_article": "MADDE 15"
+  },
+  {
+    "id": 17,
+    "question": "Burs ve yardımlardan yararlanma koşulları ve başvuruların değerlendirilmesi nasıl yapılır?",
+    "expected_document": "burs_yardim_yonergesi.pdf",
+    "expected_article": "MADDE 3"
+  },
+  {
+    "id": 18,
+    "question": "Bursların miktar ve ödeme koşulları ile süresi nasıl belirlenir?",
+    "expected_document": "burs_yardim_yonergesi.pdf",
+    "expected_article": "MADDE 4"
+  },
+  {
+    "id": 19,
+    "question": "Yükseköğretim kurumunda kınama cezasını gerektiren disiplin fiilleri nelerdir?",
+    "expected_document": "ogrenci_disiplin_yonetmeligi.pdf",
+    "expected_article": "MADDE 5"
+  },
+  {
+    "id": 20,
+    "question": "Öğrenci disiplin soruşturmasında savunma hakkı ve usulü nasıl işler?",
+    "expected_document": "ogrenci_disiplin_yonetmeligi.pdf",
+    "expected_article": "MADDE 54"
+  }
+]
