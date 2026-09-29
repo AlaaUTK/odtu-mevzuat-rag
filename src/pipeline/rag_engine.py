@@ -2,6 +2,7 @@ import os
 import sys
 import re
 from pathlib import Path
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -47,7 +48,7 @@ class RAGEngine:
         # Sorgu Genişletme (çap -> çift ana dal)
         enhanced_query = expand_query(query)
 
-        # 1. Aşama: ClickHouse Aday Havuzu (Hız için 8 aday kafi)
+        # 1. Aşama: ClickHouse Aday Havuzu (Hız için 8 aday)
         query_text = f"query: {enhanced_query}"
         query_emb = self.embed_model.encode(query_text, normalize_embeddings=True)
         candidates = self.db.search(
@@ -59,7 +60,7 @@ class RAGEngine:
         if not candidates:
             return []
 
-        # 2. Aşama: Hızlı Reranking (Maksimum 8 aday, 0.5 - 1 sn sürer)
+        # 2. Aşama: Hızlı Reranking (Cross-Encoder)
         pairs = [[enhanced_query, c["text"][:600]] for c in candidates]
         scores = self.reranker.predict(pairs)
 
@@ -69,13 +70,21 @@ class RAGEngine:
         candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
         return candidates[:self.final_k]
 
-    def answer_query(self, query: str, source_filter: str = None):
-        hits = self.retrieve(query=query, source_filter=source_filter)
+    def answer_query(self, query: str, source_filter: str = None, chat_history: Optional[List[Dict[str, str]]] = None):
+        # Çok turlu konuşma desteği: Kullanıcı takip sorusu sorduysa soruyu bağlamlandır
+        search_query = query
+        if chat_history:
+            search_query = self.llm.rewrite_query(query=query, history=chat_history)
+            if search_query != query:
+                print(f"[Query Rewriter] Orijinal: '{query}' -> Yeniden Yazılan: '{search_query}'")
+
+        hits = self.retrieve(query=search_query, source_filter=source_filter)
 
         if not hits:
             return {
                 "answer": "Sorunuzla ilgili ODTÜ mevzuatında doğrudan bir madde bulunamadı.",
-                "sources": []
+                "sources": [],
+                "rewritten_query": search_query
             }
 
         context_blocks = []
@@ -106,5 +115,6 @@ class RAGEngine:
 
         return {
             "answer": answer,
-            "sources": ui_sources
+            "sources": ui_sources,
+            "rewritten_query": search_query
         }

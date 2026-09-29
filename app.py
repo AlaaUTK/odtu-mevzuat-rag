@@ -40,12 +40,37 @@ st.markdown("""
     .source-card b {
         color: #0b0c10 !important;
     }
+    details.rewritten-details {
+        margin-bottom: 12px;
+        font-size: 0.88rem;
+        color: #555555;
+    }
+    details.rewritten-details summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: #495057;
+        list-style: none;
+        display: inline-block;
+        background: #f8f9fa;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+    }
+    details.rewritten-details summary:hover {
+        background: #e9ecef;
+    }
+    details.rewritten-details p {
+        margin-top: 6px;
+        padding-left: 8px;
+        border-left: 2px solid #adb5bd;
+        color: #212529;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 @st.cache_resource(show_spinner="ODTÜ Mevzuat RAG Motoru Hazırlanıyor...")
 def load_rag_engine():
-    return RAGEngine(candidate_k=15, final_k=3)
+    return RAGEngine(candidate_k=15, final_k=4)
 
 rag_engine = load_rag_engine()
 
@@ -79,7 +104,7 @@ with st.sidebar:
     active_source_filter = doc_filter_options[selected_doc_label]
 
     candidate_k = st.slider("Aday Havuzu (Candidate-K)", min_value=5, max_value=30, value=15, step=5)
-    final_k = st.slider("Getirilecek Madde Sayısı (Final-K)", min_value=1, max_value=5, value=3)
+    final_k = st.slider("Getirilecek Madde Sayısı (Final-K)", min_value=1, max_value=6, value=4)
 
     rag_engine.candidate_k = candidate_k
     rag_engine.final_k = final_k
@@ -98,13 +123,21 @@ if "messages" not in st.session_state:
         {
             "role": "assistant",
             "content": "Merhaba! ODTÜ Lisans, Lisansüstü, ÇAP, Yan Dal, Yurtlar, Disiplin, Yaz Okulu veya Burs yönetmelikleri hakkında sormak istediğiniz konuyu yazabilirsiniz.",
-            "sources": []
+            "sources": [],
+            "rewritten_query": None
         }
     ]
 
 # Sohbet Geçmişi
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
+        if msg.get("rewritten_query") and msg["role"] == "assistant":
+            st.markdown(f"""
+            <details class='rewritten-details'>
+                <summary>🔍 Aranan Sorgu</summary>
+                <p>{msg['rewritten_query']}</p>
+            </details>
+            """, unsafe_allow_html=True)
         st.markdown(msg["content"])
         if msg.get("sources"):
             with st.expander("Yararlanılan Mevzuat Maddeleri"):
@@ -121,15 +154,34 @@ for msg in st.session_state.messages:
 
 # Soru Giriş Alanı
 if user_prompt := st.chat_input("Mevzuatla ilgili sorunuzu buraya yazın..."):
+    current_history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in st.session_state.messages
+        if m["role"] in ["user", "assistant"]
+    ]
+
     st.session_state.messages.append({"role": "user", "content": user_prompt, "sources": []})
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("Mevzuat taranıyor ve cevap hazırlanıyor..."):
-            result = rag_engine.answer_query(query=user_prompt, source_filter=active_source_filter)
+            result = rag_engine.answer_query(
+                query=user_prompt,
+                source_filter=active_source_filter,
+                chat_history=current_history
+            )
             answer_text = result["answer"]
             sources_list = result["sources"]
+            rewritten_q = result.get("rewritten_query")
+
+            if rewritten_q and rewritten_q.lower() != user_prompt.lower():
+                st.markdown(f"""
+                <details class='rewritten-details'>
+                    <summary>🔍 Aranan Sorgu</summary>
+                    <p>{rewritten_q}</p>
+                </details>
+                """, unsafe_allow_html=True)
 
             st.markdown(answer_text)
 
@@ -149,5 +201,6 @@ if user_prompt := st.chat_input("Mevzuatla ilgili sorunuzu buraya yazın..."):
     st.session_state.messages.append({
         "role": "assistant",
         "content": answer_text,
-        "sources": sources_list
+        "sources": sources_list,
+        "rewritten_query": rewritten_q if (rewritten_q and rewritten_q.lower() != user_prompt.lower()) else None
     })
