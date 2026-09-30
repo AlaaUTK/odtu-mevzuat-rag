@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Generator
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -31,6 +31,28 @@ class GroqClient:
             max_tokens=max_tokens
         )
         return response.choices[0].message.content
+
+    def generate_stream(self, prompt: str, system_prompt: str = "", max_tokens: int = 500) -> Generator[str, None, None]:
+        """
+        Model yanıtını token bazlı gerçek zamanlı (stream) olarak yield eder.
+        """
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        stream_response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=max_tokens,
+            stream=True
+        )
+
+        for chunk in stream_response:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
 
     def rewrite_query(self, query: str, history: List[Dict[str, str]]) -> str:
         if not history:

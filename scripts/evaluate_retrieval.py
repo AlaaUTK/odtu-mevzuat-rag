@@ -1,114 +1,91 @@
+import os
 import sys
+import json
+import re
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(ROOT_DIR))
+# Proje kök dizinini ekle
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.append(str(BASE_DIR))
 
-import json
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from src.adapters.clickhouse_adapter import ClickHouseVectorDB
+from src.pipeline.rag_engine import RAGEngine
 
-def run_evaluation(use_reranker: bool = True, candidate_k: int = 10, final_k: int = 3):
-    golden_path = ROOT_DIR / "data" / "golden_set" / "golden_set.json"
-    if not golden_path.exists():
-        print(f"Hata: {golden_path} bulunamadı!")
+def normalize_article(article_str: str) -> str:
+    """Madde metninden sadece sayısal kısmı ayıklar (Örn: 'MADDE 14' -> '14')."""
+    match = re.search(r"\d+", str(article_str))
+    return match.group() if match else str(article_str).strip()
+
+def main():
+    print("=" * 65)
+    print("ODTÜ Mevzuat RAG - Hibrit Arama (Dense + BM25 + RRF) Retrieval Benchmark")
+    print("=" * 65)
+
+    golden_set_path = BASE_DIR / "data" / "golden_set" / "golden_set.json"
+    if not golden_set_path.exists():
+        print(f"Hata: {golden_set_path} bulunamadı!")
         return
 
-    with open(golden_path, "r", encoding="utf-8") as f:
+    with open(golden_set_path, "r", encoding="utf-8") as f:
         golden_set = json.load(f)
 
-    print(f"Altın Soru Havuzu: {len(golden_set)} soru")
-    print("Embedding modeli ve ClickHouse bağlantısı hazırlanıyor...")
+    # Hibrit RAG motorunu başlat (Candidate=15, Final=4)
+    engine = RAGEngine(candidate_k=15, final_k=4)
 
-    embed_model = SentenceTransformer("intfloat/multilingual-e5-base")
-    db = ClickHouseVectorDB()
-
-    reranker = None
-    if use_reranker:
-        print("Reranker modeli (BAAI/bge-reranker-v2-m3) yükleniyor...")
-        # Çok dilli (Türkçe uyumlu) güçlü reranker
-        reranker = CrossEncoder("BAAI/bge-reranker-v2-m3")
-
+    total_questions = len(golden_set)
     hit_at_1 = 0
     hit_at_3 = 0
+    hit_at_4 = 0
     reciprocal_ranks = []
-    missed_questions = []
 
-    print(f"\n--- Değerlendirme Başlatılıyor (Reranker={'AÇIK (Candidate-K: ' + str(candidate_k) + ')' if use_reranker else 'KAPALI'}) ---\n")
+    print(f"\nToplam {total_questions} altın soru üzerinde test başlatılıyor...\n")
 
-    for item in golden_set:
-        q_id = item["id"]
+    for idx, item in enumerate(golden_set, 1):
         question = item["question"]
-        exp_doc = item["expected_document"].strip().lower()
-        exp_art = item["expected_article"].strip().lower()
+        expected_doc = item["expected_document"]
+        expected_article = normalize_article(item["expected_article"])
 
-        # 1. Aşama: ClickHouse'dan aday havuzu çek (Top-10)
-        query_text = f"query: {question}"
-        query_emb = embed_model.encode(query_text, normalize_embeddings=True)
-        candidates = db.search(query_embedding=query_emb, top_k=candidate_k)
+        # Doğrudan hibrit pipeline (Dense + BM25 + RRF + Rerank) üzerinden getir
+        retrieved_docs = engine.retrieve(query=question, source_filter=None)
 
-        # 2. Aşama: Reranker ile yeniden sırala
-        if use_reranker and reranker and candidates:
-            # Soru ile her aday metni çift olarak veriyoruz
-            pairs = [[question, c["text"]] for c in candidates]
-            scores = reranker.predict(pairs)
-            
-            # Skorlara göre adayları büyükten küçüğe diz
-            scored_candidates = list(zip(candidates, scores))
-            scored_candidates.sort(key=lambda x: x[1], reverse=True)
-            hits = [item[0] for item in scored_candidates[:final_k]]
-        else:
-            hits = candidates[:final_k]
+        ranks = []
+        for rank, doc in enumerate(retrieved_docs, start=1):
+            retrieved_doc_name = doc.get("document_name", "")
+            retrieved_article = normalize_article(doc.get("article", ""))
 
-        found_rank = 0
-        for rank, hit in enumerate(hits, start=1):
-            doc_match = (hit["document_name"].strip().lower() == exp_doc)
-            art_match = (exp_art in hit["article"].strip().lower())
+            # Doküman ve madde eşleşmesi kontrolü
+            if retrieved_doc_name == expected_doc and retrieved_article == expected_article:
+                ranks.append(rank)
 
-            if doc_match and art_match:
-                found_rank = rank
-                break
-
-        if found_rank == 1:
-            hit_at_1 += 1
-            hit_at_3 += 1
-            reciprocal_ranks.append(1.0)
-            print(f"[{q_id:02d}] HIT@1 | {question[:45]}...")
-        elif 1 < found_rank <= 3:
-            hit_at_3 += 1
-            reciprocal_ranks.append(1.0 / found_rank)
-            print(f"[{q_id:02d}] HIT@{found_rank} | {question[:45]}...")
+        if ranks:
+            best_rank = min(ranks)
+            reciprocal_ranks.append(1.0 / best_rank)
+            if best_rank == 1:
+                hit_at_1 += 1
+            if best_rank <= 3:
+                hit_at_3 += 1
+            if best_rank <= 4:
+                hit_at_4 += 1
+            status = f"BAŞARILI (Sıra: {best_rank})"
         else:
             reciprocal_ranks.append(0.0)
-            print(f"[{q_id:02d}] MISSED | {question[:45]}...")
-            missed_questions.append({
-                "id": q_id,
-                "question": question,
-                "expected": f"{exp_doc} -> {exp_art}",
-                "retrieved": [f"{h['document_name']} ({h['article']})" for h in hits]
-            })
+            status = "BAŞARISIZ (İlk 4'te yok)"
 
-    total_q = len(golden_set)
-    hit_1_score = (hit_at_1 / total_q) * 100
-    hit_3_score = (hit_at_3 / total_q) * 100
-    mrr_score = sum(reciprocal_ranks) / total_q
+        print(f"[{idx:02d}/{total_questions:02d}] {question[:45]}... -> {status}")
 
-    print("\n" + "="*45)
-    print("      DEĞERLENDİRME METRİK SONUÇLARI      ")
-    print("="*45)
-    print(f"Reranker Durumu    : {'Aktif (Candidate-K: ' + str(candidate_k) + ')' if use_reranker else 'Devre Dışı'}")
-    print(f"Toplam Test Sorusu : {total_q}")
-    print(f"Hit@1 Başarımı     : %{hit_1_score:.2f} ({hit_at_1}/{total_q})")
-    print(f"Hit@3 Başarımı     : %{hit_3_score:.2f} ({hit_at_3}/{total_q})")
-    print(f"MRR Skoru          : {mrr_score:.4f}")
-    print("="*45)
+    # Metrikleri hesapla
+    hit_1_rate = (hit_at_1 / total_questions) * 100
+    hit_3_rate = (hit_at_3 / total_questions) * 100
+    hit_4_rate = (hit_at_4 / total_questions) * 100
+    mrr = (sum(reciprocal_ranks) / total_questions) * 100
 
-    if missed_questions:
-        print("\n--- İsabet Sağlanamayan Soruların Analizi ---")
-        for m in missed_questions:
-            print(f"Soru [{m['id']}]: {m['question']}")
-            print(f"  Beklenen : {m['expected']}")
-            print(f"  Gelenler : {', '.join(m['retrieved'])}\n")
+    print("\n" + "=" * 65)
+    print("HİBRİT ARAMA DEĞERLENDİRME SONUÇLARI:")
+    print(f"Hit@1: %{hit_1_rate:.2f} ({hit_at_1}/{total_questions})")
+    print(f"Hit@3: %{hit_3_rate:.2f} ({hit_at_3}/{total_questions})")
+    print(f"Hit@4: %{hit_4_rate:.2f} ({hit_at_4}/{total_questions})")
+    print(f"MRR (Mean Reciprocal Rank): %{mrr:.2f}")
+    print("=" * 65)
 
 if __name__ == "__main__":
-    run_evaluation(use_reranker=True, candidate_k=15, final_k=3)
+    main()

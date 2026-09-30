@@ -1,206 +1,193 @@
-import os
-import sys
+import streamlit as st
 from pathlib import Path
+import sys
 
+# Kök dizini yola ekle
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-import streamlit as st
 from src.pipeline.rag_engine import RAGEngine
 
 st.set_page_config(
-    page_title="ODTÜ Mevzuat Asistanı",
+    page_title="ODTÜ Mevzuat Danışmanı",
+    page_icon="🎓",
     layout="wide"
 )
 
-# Kurumsal ODTÜ Arayüz Stili
+# Özel Stil / CSS (Daha canlı ODTÜ kırmızısı: #D31145)
 st.markdown("""
 <style>
-    .main-title {
-        color: #C8102E;
+    .main-header {
+        font-size: 2.2rem;
         font-weight: 700;
-        margin-bottom: 0px;
+        color: #D31145;
+        margin-bottom: 0.2rem;
     }
-    .sub-title {
-        color: #666666;
-        font-size: 1.05rem;
-        margin-bottom: 20px;
+    .sub-header {
+        font-size: 1rem;
+        color: #555;
+        margin-bottom: 1.5rem;
     }
-    .source-card {
-        background-color: #f1f3f5;
-        border-left: 4px solid #C8102E;
-        padding: 12px 16px;
-        margin-bottom: 10px;
+    .source-box {
+        background-color: #f8f9fa;
+        border-left: 4px solid #D31145;
+        padding: 10px 14px;
+        margin-bottom: 8px;
         border-radius: 4px;
-        color: #1e1e1e !important;
-        font-size: 0.92rem;
-        line-height: 1.5;
-    }
-    .source-card b {
-        color: #0b0c10 !important;
-    }
-    details.rewritten-details {
-        margin-bottom: 12px;
         font-size: 0.88rem;
-        color: #555555;
     }
-    details.rewritten-details summary {
+    .rewritten-query-box {
+        margin-bottom: 12px;
+        font-size: 0.85rem;
+    }
+    .rewritten-query-box details {
+        background: #f1f3f5;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid #e9ecef;
         cursor: pointer;
+    }
+    .rewritten-query-box summary {
         font-weight: 600;
         color: #495057;
-        list-style: none;
-        display: inline-block;
-        background: #f8f9fa;
-        padding: 4px 10px;
-        border-radius: 6px;
-        border: 1px solid #dee2e6;
+        outline: none;
     }
-    details.rewritten-details summary:hover {
-        background: #e9ecef;
-    }
-    details.rewritten-details p {
+    .rewritten-query-box p {
         margin-top: 6px;
-        padding-left: 8px;
-        border-left: 2px solid #adb5bd;
+        margin-bottom: 0;
         color: #212529;
+        font-style: italic;
     }
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_resource(show_spinner="ODTÜ Mevzuat RAG Motoru Hazırlanıyor...")
-def load_rag_engine():
+@st.cache_resource(show_spinner="Modeller ve hibrit arama motoru yükleniyor...")
+def get_rag_engine():
     return RAGEngine(candidate_k=15, final_k=4)
 
-rag_engine = load_rag_engine()
+engine = get_rag_engine()
 
-# YAN PANEL
+# Kenar Çubuğu (Sidebar)
 with st.sidebar:
     logo_path = BASE_DIR / "logo.png"
-    if not logo_path.exists():
-        logo_path = BASE_DIR / "odtu-logo.png"
-
     if logo_path.exists():
-        st.image(str(logo_path), width=200)
-    else:
-        st.write("**ODTÜ Bilgi İşlem**")
-
+        st.image(str(logo_path), width=120)
+    
     st.title("Sistem Ayarları")
-    st.caption("İki Aşamalı Getirme & Groq LLM")
-    st.divider()
+    
+    doc_filter = st.selectbox(
+        "Kapsam Filtresi",
+        options=[
+            "Tüm Mevzuat",
+            "lisans_yonetmeligi.pdf",
+            "lisansustu_yonetmelik.pdf",
+            "yaz_okulu_yonergesi.pdf",
+            "cap_yonergesi.pdf",
+            "yandal_yonergesi.pdf",
+            "yurtlar_yonetmeligi.pdf",
+            "burs_yardim_yonergesi.pdf",
+            "disiplin_yonetmeligi.pdf"
+        ],
+        index=0
+    )
+    
+    selected_doc = None if doc_filter == "Tüm Mevzuat" else doc_filter
 
-    doc_filter_options = {
-        "Tüm Mevzuat (Filtresiz)": None,
-        "Lisans Yönetmeliği": "lisans_yonetmeligi.pdf",
-        "Lisansüstü Yönetmeliği": "lisansustu_yonetmeligi.pdf",
-        "Çift Anadal (ÇAP) Yönergesi": "cap_yonergesi.pdf",
-        "Yan Dal Yönergesi": "yan_dal_yonergesi.pdf",
-        "Yurtlar Yönetmeliği": "yurtlar_yonetmeligi.pdf",
-        "Öğrenci Disiplin Yönetmeliği": "ogrenci_disiplin_yonetmeligi.pdf",
-        "Yaz Okulu Yönergesi": "yaz_okulu_yonergesi.pdf",
-        "Burs ve Yardım Yönergesi": "burs_yardim_yonergesi.pdf"
-    }
-    selected_doc_label = st.selectbox("Hedef Mevzuat Filtresi", list(doc_filter_options.keys()))
-    active_source_filter = doc_filter_options[selected_doc_label]
-
-    candidate_k = st.slider("Aday Havuzu (Candidate-K)", min_value=5, max_value=30, value=15, step=5)
-    final_k = st.slider("Getirilecek Madde Sayısı (Final-K)", min_value=1, max_value=6, value=4)
-
-    rag_engine.candidate_k = candidate_k
-    rag_engine.final_k = final_k
-
-    st.divider()
-    if st.button("Sohbet Geçmişini Temizle", use_container_width=True):
+    st.markdown("---")
+    st.markdown("""
+    **Arama Altyapısı:**
+    -  Hibrit Arama (Dense + BM25)
+    -  Reciprocal Rank Fusion (RRF)
+    -  Cross-Encoder Reranker
+    -  Groq Qwen-27B (Streaming)
+    """)
+    
+    if st.button("🧹 Sohbeti Temizle", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-# ANA EKRAN
-st.markdown("<h1 class='main-title'>ODTÜ Mevzuat Asistanı</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>Akademik ve İdari Yönetmelikler İçin Doğrulanmış Yapay Zekâ Danışmanı</p>", unsafe_allow_html=True)
+# Ana Ekran Başlığı
+st.markdown('<div class="main-header">🎓 ODTÜ Mevzuat Danışmanı</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Öğrenci işleri, burslar, yurtlar, sınavlar ve disiplin yönetmelikleri hakkında anında ve doğrulanabilir bilgi alın.</div>', unsafe_allow_html=True)
 
+# Sohbet Geçmişi İlklendirme
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "Merhaba! ODTÜ Lisans, Lisansüstü, ÇAP, Yan Dal, Yurtlar, Disiplin, Yaz Okulu veya Burs yönetmelikleri hakkında sormak istediğiniz konuyu yazabilirsiniz.",
-            "sources": [],
-            "rewritten_query": None
-        }
-    ]
+    st.session_state.messages = []
 
-# Sohbet Geçmişi
+# Geçmiş Mesajları Listele
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        if msg.get("rewritten_query") and msg["role"] == "assistant":
-            st.markdown(f"""
-            <details class='rewritten-details'>
-                <summary>🔍 Aranan Sorgu</summary>
-                <p>{msg['rewritten_query']}</p>
-            </details>
-            """, unsafe_allow_html=True)
+        if msg["role"] == "assistant" and msg.get("rewritten_query"):
+            st.markdown(
+                f"""<div class="rewritten-query-box">
+                <details>
+                    <summary>🔍 Aranan Bağlamsal Sorgu</summary>
+                    <p>{msg["rewritten_query"]}</p>
+                </details>
+                </div>""",
+                unsafe_allow_html=True
+            )
+            
         st.markdown(msg["content"])
-        if msg.get("sources"):
-            with st.expander("Yararlanılan Mevzuat Maddeleri"):
+        
+        # Varsa kaynakları listele
+        if "sources" in msg and msg["sources"]:
+            with st.expander("📚 Dayanak Alınan Mevzuat Maddeleri", expanded=False):
                 for s in msg["sources"]:
                     st.markdown(f"""
-                    <div class='source-card'>
-                        <b>Belge:</b> {s['source']}<br>
-                        <b>İlgili Madde:</b> {s['madde']} &nbsp;|&nbsp; <b>Sayfa Aralığı:</b> {s['pages']}<br>
-                        <b>Skor:</b> {s['score']:.3f}
-                        <hr style='margin: 8px 0; border: none; border-top: 1px solid #e0e0e0;'>
-                        {s['text']}
+                    <div class="source-box">
+                        <b>{s['source']}</b> — <b>{s['madde']}</b> (Sayfa: {s['pages']})<br>
+                        <small>Uygunluk Skoru: {s['score']:.4f}</small><br>
+                        <i style="color:#666;">"{s['text'][:250]}..."</i>
                     </div>
                     """, unsafe_allow_html=True)
 
-# Soru Giriş Alanı
+# Yeni Soru Girişi
 if user_prompt := st.chat_input("Mevzuatla ilgili sorunuzu buraya yazın..."):
-    current_history = [
-        {"role": m["role"], "content": m["content"]}
-        for m in st.session_state.messages
-        if m["role"] in ["user", "assistant"]
-    ]
+    # 1. Kullanıcı mesajını arayüze ekle
+    st.chat_message("user").markdown(user_prompt)
+    st.session_state.messages.append({"role": "user", "content": user_prompt})
 
-    st.session_state.messages.append({"role": "user", "content": user_prompt, "sources": []})
-    with st.chat_message("user"):
-        st.markdown(user_prompt)
-
+    # 2. Asistan cevabını canlı (streaming) oluştur
     with st.chat_message("assistant"):
-        with st.spinner("Mevzuat taranıyor ve cevap hazırlanıyor..."):
-            result = rag_engine.answer_query(
+        with st.spinner("Mevzuat taranıyor ve bağlam oluşturuluyor..."):
+            stream_gen, sources, rewritten_query = engine.answer_query_stream(
                 query=user_prompt,
-                source_filter=active_source_filter,
-                chat_history=current_history
+                source_filter=selected_doc,
+                chat_history=st.session_state.messages[:-1]
             )
-            answer_text = result["answer"]
-            sources_list = result["sources"]
-            rewritten_q = result.get("rewritten_query")
 
-            if rewritten_q and rewritten_q.lower() != user_prompt.lower():
-                st.markdown(f"""
-                <details class='rewritten-details'>
-                    <summary>🔍 Aranan Sorgu</summary>
-                    <p>{rewritten_q}</p>
+        if rewritten_query and rewritten_query.strip().lower() != user_prompt.strip().lower():
+            st.markdown(
+                f"""<div class="rewritten-query-box">
+                <details open>
+                    <summary>🔍 Aranan Bağlamsal Sorgu</summary>
+                    <p>{rewritten_query}</p>
                 </details>
-                """, unsafe_allow_html=True)
+                </div>""",
+                unsafe_allow_html=True
+            )
 
-            st.markdown(answer_text)
+        # Yanıtı ekrana token token canlı akıt
+        full_response = st.write_stream(stream_gen)
 
-            if sources_list:
-                with st.expander("Yararlanılan Mevzuat Maddeleri"):
-                    for s in sources_list:
-                        st.markdown(f"""
-                        <div class='source-card'>
-                            <b>Belge:</b> {s['source']}<br>
-                            <b>İlgili Madde:</b> {s['madde']} &nbsp;|&nbsp; <b>Sayfa Aralığı:</b> {s['pages']}<br>
-                            <b>Skor:</b> {s['score']:.3f}
-                            <hr style='margin: 8px 0; border: none; border-top: 1px solid #e0e0e0;'>
-                            {s['text']}
-                        </div>
-                        """, unsafe_allow_html=True)
+        # Kaynakları göster
+        if sources:
+            with st.expander("📚 Dayanak Alınan Mevzuat Maddeleri", expanded=False):
+                for s in sources:
+                    st.markdown(f"""
+                    <div class="source-box">
+                        <b>{s['source']}</b> — <b>{s['madde']}</b> (Sayfa: {s['pages']})<br>
+                        <small>Uygunluk Skoru: {s['score']:.4f}</small><br>
+                        <i style="color:#666;">"{s['text'][:250]}..."</i>
+                    </div>
+                    """, unsafe_allow_html=True)
 
+    # 3. Asistan mesajını hafızaya kaydet
     st.session_state.messages.append({
         "role": "assistant",
-        "content": answer_text,
-        "sources": sources_list,
-        "rewritten_query": rewritten_q if (rewritten_q and rewritten_q.lower() != user_prompt.lower()) else None
+        "content": full_response,
+        "sources": sources,
+        "rewritten_query": rewritten_query if rewritten_query != user_prompt else None
     })
