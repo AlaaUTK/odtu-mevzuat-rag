@@ -29,9 +29,6 @@ def expand_query(query: str) -> str:
     return expanded
 
 def reciprocal_rank_fusion(dense_results: List[Dict[str, Any]], bm25_results: List[Dict[str, Any]], k: int = 60) -> List[Dict[str, Any]]:
-    """
-    Vektör ve BM25 sıralamalarını Reciprocal Rank Fusion (RRF) ile birleştirir.
-    """
     fused_scores = {}
     doc_map = {}
 
@@ -56,9 +53,10 @@ def reciprocal_rank_fusion(dense_results: List[Dict[str, Any]], bm25_results: Li
     return fused_list
 
 class RAGEngine:
-    def __init__(self, candidate_k: int = 15, final_k: int = 4):
+    def __init__(self, candidate_k: int = 15, final_k: int = 4, score_threshold: float = 0.10):
         self.candidate_k = candidate_k
         self.final_k = final_k
+        self.score_threshold = score_threshold
 
         print("Embedding modeli (multilingual-e5-base) yükleniyor...")
         self.embed_model = SentenceTransformer("intfloat/multilingual-e5-base")
@@ -148,9 +146,10 @@ class RAGEngine:
 
         hits = self.retrieve(query=search_query, source_filter=source_filter)
 
-        if not hits:
+        # Eşik kontrolü: Eğer en iyi adayın skoru eşiğin altındaysa veya sonuç yoksa
+        if not hits or hits[0].get("rerank_score", 0.0) < self.score_threshold:
             return {
-                "answer": "Sorunuzla ilgili ODTÜ mevzuatında doğrudan bir madde bulunamadı.",
+                "answer": "Bu soru ODTÜ akademik mevzuatı kapsamında yer almamaktadır. Lütfen yönetmelikler, yönergeler, kayıt, sınav, burs veya yurt süreçleriyle ilgili bir soru sorunuz.",
                 "sources": [],
                 "rewritten_query": search_query
             }
@@ -167,6 +166,7 @@ class RAGEngine:
     def answer_query_stream(self, query: str, source_filter: str = None, chat_history: Optional[List[Dict[str, str]]] = None):
         """
         Streamlit için yanıtı token token yield eden jeneratör ve kaynakları döndürür.
+        Eşik kontrolü eklenmiştir.
         """
         search_query = query
         if chat_history:
@@ -176,10 +176,11 @@ class RAGEngine:
 
         hits = self.retrieve(query=search_query, source_filter=source_filter)
 
-        if not hits:
-            def empty_generator():
-                yield "Sorunuzla ilgili ODTÜ mevzuatında doğrudan bir madde bulunamadı."
-            return empty_generator(), [], search_query
+        # Eşik kontrolü
+        if not hits or hits[0].get("rerank_score", 0.0) < self.score_threshold:
+            def out_of_scope_generator():
+                yield "Bu soru ODTÜ akademik mevzuatı kapsamında yer almamaktadır. Lütfen yönetmelikler, yönergeler, kayıt, sınav, burs veya yurt süreçleriyle ilgili bir soru sorunuz."
+            return out_of_scope_generator(), [], search_query
 
         system_prompt, user_prompt, ui_sources = self._prepare_prompt(query, hits)
         stream_generator = self.llm.generate_stream(prompt=user_prompt, system_prompt=system_prompt)

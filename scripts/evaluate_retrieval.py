@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import re
+import argparse
 from pathlib import Path
 
 # Proje kök dizinini ekle
@@ -17,8 +18,13 @@ def normalize_article(article_str: str) -> str:
     return match.group() if match else str(article_str).strip()
 
 def main():
+    parser = argparse.ArgumentParser(description="Retrieval Benchmark Parametre Testi")
+    parser.add_argument("--candidate_k", type=int, default=15, help="Reranker'a giren aday havuzu büyüklüğü")
+    parser.add_argument("--final_k", type=int, default=4, help="LLM'e giden nihai bağlam parça sayısı")
+    args = parser.parse_args()
+
     print("=" * 65)
-    print("ODTÜ Mevzuat RAG - Hibrit Arama (Dense + BM25 + RRF) Retrieval Benchmark")
+    print(f"ODTÜ Mevzuat RAG - Retrieval Benchmark (candidate_k={args.candidate_k}, final_k={args.final_k})")
     print("=" * 65)
 
     golden_set_path = BASE_DIR / "data" / "golden_set" / "golden_set.json"
@@ -29,8 +35,8 @@ def main():
     with open(golden_set_path, "r", encoding="utf-8") as f:
         golden_set = json.load(f)
 
-    # Hibrit RAG motorunu başlat (Candidate=15, Final=4)
-    engine = RAGEngine(candidate_k=15, final_k=4)
+    # Parametrik RAG motorunu başlat
+    engine = RAGEngine(candidate_k=args.candidate_k, final_k=args.final_k)
 
     total_questions = len(golden_set)
     hit_at_1 = 0
@@ -45,7 +51,6 @@ def main():
         expected_doc = item["expected_document"]
         expected_article = normalize_article(item["expected_article"])
 
-        # Doğrudan hibrit pipeline (Dense + BM25 + RRF + Rerank) üzerinden getir
         retrieved_docs = engine.retrieve(query=question, source_filter=None)
 
         ranks = []
@@ -53,7 +58,6 @@ def main():
             retrieved_doc_name = doc.get("document_name", "")
             retrieved_article = normalize_article(doc.get("article", ""))
 
-            # Doküman ve madde eşleşmesi kontrolü
             if retrieved_doc_name == expected_doc and retrieved_article == expected_article:
                 ranks.append(rank)
 
@@ -69,22 +73,21 @@ def main():
             status = f"BAŞARILI (Sıra: {best_rank})"
         else:
             reciprocal_ranks.append(0.0)
-            status = "BAŞARISIZ (İlk 4'te yok)"
+            status = f"BAŞARISIZ (İlk {args.final_k}'te yok)"
 
         print(f"[{idx:02d}/{total_questions:02d}] {question[:45]}... -> {status}")
 
-    # Metrikleri hesapla
     hit_1_rate = (hit_at_1 / total_questions) * 100
     hit_3_rate = (hit_at_3 / total_questions) * 100
     hit_4_rate = (hit_at_4 / total_questions) * 100
     mrr = (sum(reciprocal_ranks) / total_questions) * 100
 
     print("\n" + "=" * 65)
-    print("HİBRİT ARAMA DEĞERLENDİRME SONUÇLARI:")
+    print(f"SONUÇLAR (candidate_k={args.candidate_k}):")
     print(f"Hit@1: %{hit_1_rate:.2f} ({hit_at_1}/{total_questions})")
     print(f"Hit@3: %{hit_3_rate:.2f} ({hit_at_3}/{total_questions})")
     print(f"Hit@4: %{hit_4_rate:.2f} ({hit_at_4}/{total_questions})")
-    print(f"MRR (Mean Reciprocal Rank): %{mrr:.2f}")
+    print(f"MRR: %{mrr:.2f}")
     print("=" * 65)
 
 if __name__ == "__main__":

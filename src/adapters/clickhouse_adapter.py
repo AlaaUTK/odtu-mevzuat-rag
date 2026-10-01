@@ -63,6 +63,12 @@ class ClickHouseVectorDB:
             ]
         )
         print(f"Toplam {len(data)} chunk ClickHouse tablosuna başarıyla yazıldı.")
+        
+    def delete_by_document(self, document_name: str):
+            """Belirtilen dokümana ait tüm satırları ClickHouse tablosundan siler."""
+            query = f"ALTER TABLE {self.table_name} DELETE WHERE document_name = %(doc_name)s"
+            self.client.command(query, parameters={"doc_name": document_name})
+            print(f"'{document_name}' için ClickHouse üzerindeki eski kayıtlar temizlendi.")
 
     def search(
         self,
