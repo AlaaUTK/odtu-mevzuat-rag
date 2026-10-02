@@ -1,91 +1,108 @@
 import os
-from pathlib import Path
+import time
 from typing import List, Dict, Generator
+from groq import Groq, RateLimitError, APIConnectionError, InternalServerError
 from dotenv import load_dotenv
-from groq import Groq
+from pathlib import Path
 
-# .env dosyasını mutlak yol ile yükle
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 class GroqClient:
-    def __init__(self, model_name: str = "qwen/qwen3.8-27b", temperature: float = 0.0):
+    def __init__(self, model_name: str = "qwen/qwen3.8-27b"):
         self.api_key = os.getenv("GROQ_API_KEY")
         if not self.api_key:
-            raise ValueError("GROQ_API_KEY .env dosyasında bulunamadı!")
-            
+            raise ValueError("GROQ_API_KEY ortam değişkeni bulunamadı. Lütfen .env dosyasını kontrol edin.")
         self.client = Groq(api_key=self.api_key)
         self.model_name = model_name
-        self.temperature = temperature
 
-    def generate(self, prompt: str, system_prompt: str = "", max_tokens: int = 400) -> str:
+    def generate(self, prompt: str, system_prompt: str = None, max_retries: int = 3) -> str:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=max_tokens
-        )
-        return response.choices[0].message.content
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=1024,
+                )
+                return response.choices[0].message.content
+            except (RateLimitError, APIConnectionError, InternalServerError) as e:
+                wait_time = (2 ** attempt) + 1
+                print(f"[Groq Uyarı] API hatası ({e}). {wait_time}s sonra yeniden deneniyor... (Deneme {attempt + 1}/{max_retries})")
+                if attempt == max_retries - 1:
+                    return "Üzgünüz, şu anda dil modeli servisinde geçici bir yoğunluk yaşanıyor. Lütfen sorunuzu birkaç saniye sonra tekrar deneyiniz."
+                time.sleep(wait_time)
+            except Exception as e:
+                print(f"[Groq Hata] Beklenmeyen hata: {e}")
+                return "Sistemsel bir hata oluştu. Lütfen sistem yöneticisi ile iletişime geçiniz."
 
-    def generate_stream(self, prompt: str, system_prompt: str = "", max_tokens: int = 500) -> Generator[str, None, None]:
-        """
-        Model yanıtını token bazlı gerçek zamanlı (stream) olarak yield eder.
-        """
+    def generate_stream(self, prompt: str, system_prompt: str = None, max_retries: int = 3) -> Generator[str, None, None]:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        stream_response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=max_tokens,
-            stream=True
-        )
-
-        for chunk in stream_response:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield content
+        for attempt in range(max_retries):
+            try:
+                stream = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=1024,
+                    stream=True,
+                )
+                for chunk in stream:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
+                return  # Başarıyla bitti
+            except (RateLimitError, APIConnectionError, InternalServerError) as e:
+                wait_time = (2 ** attempt) + 1
+                print(f"[Groq Stream Uyarı] API hatası ({e}). {wait_time}s sonra yeniden deneniyor... (Deneme {attempt + 1}/{max_retries})")
+                if attempt == max_retries - 1:
+                    yield "⚠️ *Üzgünüz, dil modeli servisinde geçici bir yoğunluk veya bağlantı sorunu yaşanıyor. Lütfen sorunuzu birazdan tekrar yöneltiniz.*"
+                    return
+                time.sleep(wait_time)
+            except Exception as e:
+                print(f"[Groq Stream Hata] Beklenmeyen hata: {e}")
+                yield "⚠️ *Sorgu yanıtlanırken beklenmeyen bir hata oluştu.*"
+                return
 
     def rewrite_query(self, query: str, history: List[Dict[str, str]]) -> str:
+        """
+        Geçmiş konuşmayı kullanarak örtük zamirleri/bağlamları tekil ve açık bir arama sorgusuna dönüştürür.
+        """
         if not history:
             return query
 
-        history_context = ""
-        for turn in history[-6:]:
-            role_label = "Kullanıcı" if turn.get("role") == "user" else "Asistan"
-            history_context += f"{role_label}: {turn.get('content', '')}\n"
+        formatted_history = ""
+        for msg in history[-4:]:
+            role = "Kullanıcı" if msg["role"] == "user" else "Asistan"
+            formatted_history += f"{role}: {msg['content']}\n"
 
-        prompt = f"""Aşağıdaki konuşma geçmişini ve kullanıcının son sorusunu incele.
-Kullanıcının son sorusunu, konuşma geçmişindeki atıfları (zamirler, ima edilen konular, belgeler) yerine koyarak ODTÜ mevzuat veritabanında aratılabilecek bağımsız, tekil bir soru cümlesi haline getir.
-
-KURALLAR:
-1. Kesinlikle soruya yanıt verme!
-2. Sadece ve sadece yeniden yazılmış soruyu döndür.
-3. Eğer soru zaten tek başına net ve anlaşılırsa veya geçmişle ilgisi yoksa aynen bırak.
-
-Konuşma Geçmişi:
-{history_context}
-
-Kullanıcının Son Sorusu: {query}
-
-Yeniden Yazılmış Soru:"""
+        prompt = (
+            "Aşağıdaki konuşma geçmişini ve son kullanıcı sorusunu dikkate alarak, "
+            "arama motorunun (vektör/BM25) en iyi mevzuat maddesini bulabilmesi için soruyu tek bir açık, müstakil ve net sorguya dönüştür.\n"
+            "Örtük zamirleri ('bunun', 'onun', 'bu durumda') önceki bağlamla tamamla.\n"
+            "YALNIZCA üretilen yeni sorgu cümlesini yaz, tırnak işareti, açıklama veya ek metin ekleme.\n\n"
+            f"Konuşma Geçmişi:\n{formatted_history}\n"
+            f"Son Kullanıcı Sorusu: {query}\n"
+            "Yeniden Yazılmış Sorgu:"
+        )
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=80
+                max_tokens=100,
             )
-            rewritten = response.choices[0].message.content.strip().strip('"')
+            rewritten = response.choices[0].message.content.strip().strip('"').strip("'")
             return rewritten if rewritten else query
         except Exception:
             return query

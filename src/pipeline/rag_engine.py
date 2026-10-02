@@ -1,9 +1,11 @@
 import os
 import sys
 import re
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Generator
 from dotenv import load_dotenv
+from src.utils.logger import AuditLogger
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -138,6 +140,7 @@ class RAGEngine:
         return system_prompt, user_prompt, ui_sources
 
     def answer_query(self, query: str, source_filter: str = None, chat_history: Optional[List[Dict[str, str]]] = None):
+        start_time = time.time()
         search_query = query
         if chat_history:
             search_query = self.llm.rewrite_query(query=query, history=chat_history)
@@ -145,9 +148,20 @@ class RAGEngine:
                 print(f"[Query Rewriter] Orijinal: '{query}' -> Yeniden Yazılan: '{search_query}'")
 
         hits = self.retrieve(query=search_query, source_filter=source_filter)
+        top_score = hits[0].get("rerank_score", 0.0) if hits else 0.0
 
-        # Eşik kontrolü: Eğer en iyi adayın skoru eşiğin altındaysa veya sonuç yoksa
-        if not hits or hits[0].get("rerank_score", 0.0) < self.score_threshold:
+        # Eşik kontrolü
+        if not hits or top_score < self.score_threshold:
+            latency = time.time() - start_time
+            AuditLogger.log_query(
+                query=query,
+                rewritten_query=search_query,
+                latency_sec=latency,
+                is_in_scope=False,
+                top_score=top_score,
+                sources=[],
+                doc_filter=source_filter
+            )
             return {
                 "answer": "Bu soru ODTÜ akademik mevzuatı kapsamında yer almamaktadır. Lütfen yönetmelikler, yönergeler, kayıt, sınav, burs veya yurt süreçleriyle ilgili bir soru sorunuz.",
                 "sources": [],
@@ -156,6 +170,17 @@ class RAGEngine:
 
         system_prompt, user_prompt, ui_sources = self._prepare_prompt(query, hits)
         answer = self.llm.generate(prompt=user_prompt, system_prompt=system_prompt)
+        
+        latency = time.time() - start_time
+        AuditLogger.log_query(
+            query=query,
+            rewritten_query=search_query,
+            latency_sec=latency,
+            is_in_scope=True,
+            top_score=top_score,
+            sources=ui_sources,
+            doc_filter=source_filter
+        )
 
         return {
             "answer": answer,
@@ -164,10 +189,7 @@ class RAGEngine:
         }
 
     def answer_query_stream(self, query: str, source_filter: str = None, chat_history: Optional[List[Dict[str, str]]] = None):
-        """
-        Streamlit için yanıtı token token yield eden jeneratör ve kaynakları döndürür.
-        Eşik kontrolü eklenmiştir.
-        """
+        start_time = time.time()
         search_query = query
         if chat_history:
             search_query = self.llm.rewrite_query(query=query, history=chat_history)
@@ -175,14 +197,36 @@ class RAGEngine:
                 print(f"[Query Rewriter] Orijinal: '{query}' -> Yeniden Yazılan: '{search_query}'")
 
         hits = self.retrieve(query=search_query, source_filter=source_filter)
+        top_score = hits[0].get("rerank_score", 0.0) if hits else 0.0
 
         # Eşik kontrolü
-        if not hits or hits[0].get("rerank_score", 0.0) < self.score_threshold:
+        if not hits or top_score < self.score_threshold:
+            latency = time.time() - start_time
+            AuditLogger.log_query(
+                query=query,
+                rewritten_query=search_query,
+                latency_sec=latency,
+                is_in_scope=False,
+                top_score=top_score,
+                sources=[],
+                doc_filter=source_filter
+            )
             def out_of_scope_generator():
                 yield "Bu soru ODTÜ akademik mevzuatı kapsamında yer almamaktadır. Lütfen yönetmelikler, yönergeler, kayıt, sınav, burs veya yurt süreçleriyle ilgili bir soru sorunuz."
             return out_of_scope_generator(), [], search_query
 
         system_prompt, user_prompt, ui_sources = self._prepare_prompt(query, hits)
         stream_generator = self.llm.generate_stream(prompt=user_prompt, system_prompt=system_prompt)
+
+        latency = time.time() - start_time
+        AuditLogger.log_query(
+            query=query,
+            rewritten_query=search_query,
+            latency_sec=latency,
+            is_in_scope=True,
+            top_score=top_score,
+            sources=ui_sources,
+            doc_filter=source_filter
+        )
 
         return stream_generator, ui_sources, search_query
