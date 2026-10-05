@@ -62,8 +62,8 @@ def main():
         golden_set = json.load(f)
 
     # RAG Motoru ve Hakem (aynı model, kısıtlı token)
-    rag_engine = RAGEngine(candidate_k=15, final_k=3)
-    judge_llm = GroqClient(model_name="qwen/qwen3.8-27b", temperature=0.0)
+    rag_engine = RAGEngine(candidate_k=30, final_k=4)
+    judge_llm = GroqClient(model_name="qwen/qwen3.8-27b")
 
     total_faithfulness = 0.0
     total_relevance = 0.0
@@ -78,6 +78,7 @@ def main():
         result = rag_engine.answer_query(query=q, source_filter=None)
         answer = result["answer"]
         sources = result["sources"]
+        time.sleep(3)
 
         # Bağlamı tek metin yap
         context = "\n".join([f"Belge: {s['source']} | Madde: {s['madde']} | Metin: {s['text']}" for s in sources])

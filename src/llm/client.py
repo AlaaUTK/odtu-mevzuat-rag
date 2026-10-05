@@ -16,7 +16,7 @@ class GroqClient:
         self.client = Groq(api_key=self.api_key)
         self.model_name = model_name
 
-    def generate(self, prompt: str, system_prompt: str = None, max_retries: int = 3) -> str:
+    def generate(self, prompt: str, system_prompt: str = None, max_retries: int = 3, max_tokens: int = 512) -> str:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -28,7 +28,7 @@ class GroqClient:
                     model=self.model_name,
                     messages=messages,
                     temperature=0.1,
-                    max_tokens=1024,
+                    max_tokens=max_tokens,
                 )
                 return response.choices[0].message.content
             except (RateLimitError, APIConnectionError, InternalServerError) as e:
@@ -53,7 +53,7 @@ class GroqClient:
                     model=self.model_name,
                     messages=messages,
                     temperature=0.1,
-                    max_tokens=1024,
+                    max_tokens=max_tokens,
                     stream=True,
                 )
                 for chunk in stream:

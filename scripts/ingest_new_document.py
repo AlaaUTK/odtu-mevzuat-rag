@@ -1,142 +1,205 @@
+"""
+scripts/ingest_new_document.py
+
+Yeni PDF mevzuat belgelerini veya kılavuzları sisteme entegre eden uçtan uca boru hattı.
+- Belgelerde MADDE varsa madde bazlı ayrıştırır.
+- Kılavuz tarzı (MADDE içermeyen) belgelerde pencereleme (windowing) yöntemiyle dengeli parçalar üretir.
+- Metinleri multilingual-e5-base ile vektörleştirir.
+- ClickHouse'a idempotent (varsa eskisini silip) yazar.
+- BM25Chunks (chunks.json) dizinini senkronize eder.
+"""
+
 import os
 import sys
 import json
 import re
-import uuid
 import argparse
-from pathlib import Path
 from typing import List, Dict, Any
-from pypdf import PdfReader
+import pypdf
 from sentence_transformers import SentenceTransformer
 
-# Proje kök dizini
-BASE_DIR = Path(__file__).resolve().parent.parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.append(str(BASE_DIR))
+# Proje kök dizinini ekle
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.adapters.clickhouse_adapter import ClickHouseVectorDB
 
-def extract_chunks_from_pdf(pdf_path: Path) -> List[Dict[str, Any]]:
-    """
-    Verilen PDF dosyasını okur ve madde bazlı chunk'lara böler.
-    """
-    reader = PdfReader(str(pdf_path))
-    doc_name = pdf_path.name
-    full_pages = []
+ARTICLE_PATTERN = re.compile(
+    r'(?:^|\n)\s*(?:(?:GEÇİCİ|GECICI)\s+)?(?:MADDE|Madde)\s*[-–—:.]*\s*(\d+)',
+    re.MULTILINE
+)
 
-    for page_num, page in enumerate(reader.pages, start=1):
+def extract_pdf_pages(pdf_path: str) -> List[Dict[str, Any]]:
+    reader = pypdf.PdfReader(pdf_path)
+    pages = []
+    for idx, page in enumerate(reader.pages):
         text = page.extract_text() or ""
-        text = re.sub(r"[ \t]+", " ", text).strip()
-        full_pages.append((page_num, text))
+        pages.append({"page_num": idx + 1, "text": text})
+    return pages
 
-    article_pattern = re.compile(r"(MADDE\s+\d+|Geçici\s+Madde\s+\d+)", re.IGNORECASE)
-
+def parse_guideline_content(full_text: str, doc_name: str) -> List[Dict[str, Any]]:
+    """MADDE formatında olmayan kılavuzları 120-180 kelimelik dengeli parçalara böler."""
     chunks = []
-    current_article = "GİRİŞ / GENEL HÜKÜMLER"
-    current_text = []
-    start_page = 1
-
-    for page_num, text in full_pages:
-        lines = text.split("\n")
-        for line in lines:
-            line_clean = line.strip()
-            if not line_clean:
-                continue
-
-            match = article_pattern.match(line_clean)
-            if match:
-                if current_text:
-                    body = " ".join(current_text).strip()
-                    if len(body) > 40:
-                        chunks.append({
-                            "chunk_id": f"{doc_name}_{current_article.replace(' ', '_')}_{start_page}_{str(uuid.uuid4())[:6]}",
-                            "document_name": doc_name,
-                            "article": current_article,
-                            "page_start": start_page,
-                            "page_end": page_num,
-                            "text": f"{current_article}\n{body}"
-                        })
-                current_article = match.group().upper()
-                current_text = [line_clean[match.end():].strip()]
-                start_page = page_num
-            else:
-                current_text.append(line_clean)
-
-    if current_text:
-        body = " ".join(current_text).strip()
-        if len(body) > 40:
+    lines = [line.strip() for line in full_text.splitlines() if line.strip() and not line.strip().isdigit()]
+    
+    current_lines = []
+    current_words = 0
+    part_idx = 1
+    
+    for line in lines:
+        words = line.split()
+        if current_words + len(words) > 160 and current_lines:
+            combined_text = " ".join(current_lines)
+            summary_title = current_lines[0][:40].strip()
             chunks.append({
-                "chunk_id": f"{doc_name}_{current_article.replace(' ', '_')}_{start_page}_{str(uuid.uuid4())[:6]}",
-                "document_name": doc_name,
-                "article": current_article,
-                "page_start": start_page,
-                "page_end": len(reader.pages),
-                "text": f"{current_article}\n{body}"
+                "article": f"KISIM {part_idx} ({summary_title})",
+                "text": f"[{doc_name} - KISIM {part_idx}]\n{combined_text}",
+                "page_start": 1,
+                "page_end": 2
             })
-
+            part_idx += 1
+            current_lines = [line]
+            current_words = len(words)
+        else:
+            current_lines.append(line)
+            current_words += len(words)
+            
+    if current_lines:
+        combined_text = " ".join(current_lines)
+        summary_title = current_lines[0][:40].strip()
+        chunks.append({
+            "article": f"KISIM {part_idx} ({summary_title})",
+            "text": f"[{doc_name} - KISIM {part_idx}]\n{combined_text}",
+            "page_start": 1,
+            "page_end": 2
+        })
+        
     return chunks
 
-def main():
-    parser = argparse.ArgumentParser(description="Mevcut RAG sistemine yeni bir PDF yönerge ekler.")
-    parser.add_argument("--pdf_path", type=str, required=True, help="Eklenecek PDF dosyasının yolu")
-    args = parser.parse_args()
-
-    pdf_file = Path(args.pdf_path)
-    if not pdf_file.exists():
-        print(f"Hata: Belirtilen PDF dosyası bulunamadı: {pdf_file}")
-        return
-
-    print("=" * 65)
-    print(f"YENİ DOKÜMAN İŞLEME VE İNDEKSLEME: {pdf_file.name}")
-    print("=" * 65)
-
-    # 1. PDF'ten chunk'ları ayıkla
-    print("\n[1/4] PDF okunuyor ve maddelere ayrıştırılıyor...")
-    new_chunks = extract_chunks_from_pdf(pdf_file)
-    print(f"-> Toplam {len(new_chunks)} adet mevzuat chunk'ı oluşturuldu.")
-
-    if not new_chunks:
-        print("Uyarı: PDF'ten geçerli bir madde/metin bloğu çıkarılamadı.")
-        return
-
-    # 2. Embedding üretimi (E5-base)
-    print("\n[2/4] multilingual-e5-base ile vektörler hesaplanıyor...")
-    embed_model = SentenceTransformer("intfloat/multilingual-e5-base")
-    passages = [f"passage: {c['text']}" for c in new_chunks]
-    embeddings = embed_model.encode(passages, normalize_embeddings=True, show_progress_bar=True)
-
-    # 3. ClickHouse'a ekleme (Mevcut insert_chunks imzasını kullanıyoruz)
-    print("\n[3/4] ClickHouse veritabanına aktarılıyor...")
-    db = ClickHouseVectorDB()
+def parse_document_to_chunks(pdf_path: str) -> List[Dict[str, Any]]:
+    doc_name = os.path.basename(pdf_path)
+    pages = extract_pdf_pages(pdf_path)
+    full_text = "\n".join([f"[SAYFA {p['page_num']}]\n{p['text']}" for p in pages])
     
-    # Eskileri temizle (Idempotent yükleme)
-    db.delete_by_document(pdf_file.name)
+    matches = list(ARTICLE_PATTERN.finditer(full_text))
     
-    # Yenileri ekle
-    db.insert_chunks(chunks=new_chunks, embeddings=embeddings)
+    # MADDE bulunamadıysa kılavuz ayrıştırıcısını devreye sok
+    if len(matches) < 2:
+        raw_full_text = "\n".join([p['text'] for p in pages])
+        guide_chunks = parse_guideline_content(raw_full_text, doc_name)
+        result = []
+        for i, c in enumerate(guide_chunks):
+            result.append({
+                "chunk_id": f"{doc_name}_part_{i+1}",
+                "document_name": doc_name,
+                "article": c["article"],
+                "text": c["text"],
+                "page_start": c["page_start"],
+                "page_end": c["page_end"],
+                "source": doc_name
+            })
+        return result
 
-    # 4. chunks.json (BM25 verisi) senkronizasyonu
-    print("\n[4/4] data/processed/chunks.json güncelleniyor (BM25 senkronizasyonu)...")
-    chunks_path = BASE_DIR / "data" / "processed" / "chunks.json"
-    
-    existing_chunks = []
-    if chunks_path.exists():
-        with open(chunks_path, "r", encoding="utf-8") as f:
-            existing_chunks = json.load(f)
+    # Standart Madde Bazlı Ayrıştırma
+    chunks = []
+    for i in range(len(matches)):
+        start_pos = matches[i].start()
+        end_pos = matches[i+1].start() if i + 1 < len(matches) else len(full_text)
+        
+        match_text = matches[i].group(0).strip()
+        article_num = matches[i].group(1)
+        article_label = f"GEÇİCİ MADDE {article_num}" if "GEÇİCİ" in match_text.upper() or "GECICI" in match_text.upper() else f"MADDE {article_num}"
+        
+        chunk_raw = full_text[start_pos:end_pos].strip()
+        
+        page_matches = re.findall(r'\[SAYFA (\d+)\]', chunk_raw)
+        p_start = int(page_matches[0]) if page_matches else 1
+        p_end = int(page_matches[-1]) if page_matches else p_start
+        
+        clean_text = re.sub(r'\[SAYFA \d+\]\n?', '', chunk_raw).strip()
+        
+        chunks.append({
+            "chunk_id": f"{doc_name}_{article_label.replace(' ', '_')}",
+            "document_name": doc_name,
+            "article": article_label,
+            "text": clean_text,
+            "page_start": p_start,
+            "page_end": p_end,
+            "source": doc_name
+        })
+        
+    return chunks
 
-    # Idempotency: Eğer bu doküman daha önce eklendiyse eskilerini temizle
-    filtered_chunks = [c for c in existing_chunks if c.get("document_name") != pdf_file.name]
-    
-    # Yeni parçaları listeye ekle
+def sync_bm25_chunks(new_chunks: List[Dict[str, Any]], doc_name: str, json_path: str = "data/processed/chunks.json"):
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+    all_chunks = []
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as f:
+            all_chunks = json.load(f)
+            
+    filtered_chunks = [c for c in all_chunks if c.get("document_name") != doc_name]
     filtered_chunks.extend(new_chunks)
-
-    with open(chunks_path, "w", encoding="utf-8") as f:
+    
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(filtered_chunks, f, ensure_ascii=False, indent=2)
+    print(f"[OK] BM25 chunks.json güncellendi. Toplam parça: {len(filtered_chunks)}")
 
-    print(f"-> chunks.json güncellendi. Toplam parça sayısı: {len(filtered_chunks)}")
-    print("\n" + "=" * 65)
-    print(f"BAŞARILI: '{pdf_file.name}' hem Vektör (ClickHouse) hem Sparse (BM25) aramaya dahil edildi!")
-    print("=" * 65)
+def ingest_pdf(pdf_path: str, client: ClickHouseVectorDB, embedder: SentenceTransformer):
+    doc_name = os.path.basename(pdf_path)
+    print(f"\n==========================================")
+    print(f"İşleniyor: {doc_name}")
+    print(f"==========================================")
+    
+    chunks = parse_document_to_chunks(pdf_path)
+    if not chunks:
+        print(f"[HATA] {doc_name} dosyasından parça çıkarılamadı!")
+        return 0
+    print(f"-> {len(chunks)} parça çıkarıldı.")
+    
+    texts_to_embed = [f"passage: {c['text']}" for c in chunks]
+    print(f"-> Vektörleştiriliyor (multilingual-e5-base)...")
+    # numpy array olarak alıyoruz (.tolist() yapmadan)
+    embeddings = embedder.encode(texts_to_embed, normalize_embeddings=True)
+    
+    print(f"-> ClickHouse eski kayıtlar temizleniyor (idempotent)...")
+    client.delete_by_document(doc_name)
+    
+    print(f"-> ClickHouse'a {len(chunks)} parça ekleniyor...")
+    client.insert_chunks(chunks, embeddings)
+    
+    sync_bm25_chunks(chunks, doc_name)
+    print(f"[BAŞARILI] {doc_name} sisteme entegre edildi.")
+    return len(chunks)
+
+def main():
+    parser = argparse.ArgumentParser(description="PDF Mevzuat Belgesini Sisteme Entegre Et")
+    parser.add_argument("--pdf", type=str, help="İşlenecek tekil PDF dosyasının yolu")
+    parser.add_argument("--all-new", action="store_true", help="data/raw altındaki henüz işlenmemiş tüm PDF'leri sırayla ekle")
+    args = parser.parse_args()
+    
+    client = ClickHouseVectorDB()
+    embedder = SentenceTransformer("intfloat/multilingual-e5-base")
+    
+    if args.all_new:
+        existing_docs = set()
+        if os.path.exists("data/processed/chunks.json"):
+            with open("data/processed/chunks.json", "r", encoding="utf-8") as f:
+                existing_docs = {c.get("document_name") for c in json.load(f)}
+                
+        raw_files = [f for f in os.listdir("data/raw") if f.endswith(".pdf")]
+        to_process = [f for f in raw_files if f not in existing_docs]
+        
+        print(f"Taranan PDF: {len(raw_files)} | Zaten Yüklü: {len(existing_docs)} | Yüklenecek Yeni: {len(to_process)}")
+        for doc_file in to_process:
+            ingest_pdf(os.path.join("data/raw", doc_file), client, embedder)
+        print("\n[TAMAMLANDI] Tüm yeni belgeler başarıyla yüklendi!")
+        
+    elif args.pdf:
+        if not os.path.exists(args.pdf):
+            print(f"Dosya bulunamadı: {args.pdf}")
+            return
+        ingest_pdf(args.pdf, client, embedder)
+    else:
+        print("Lütfen --pdf <dosya_yolu> veya --all-new parametresi verin.")
 
 if __name__ == "__main__":
     main()
