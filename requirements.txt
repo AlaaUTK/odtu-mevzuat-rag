@@ -111,3 +111,6 @@ websockets==17.1
 yarl==1.25.1
 streamlit
 python-dotenv
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+sse-starlette>=2.0.0

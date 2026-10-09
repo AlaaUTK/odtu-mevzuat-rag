@@ -23,3 +23,10 @@ clickhouse_data/
 
 # Streamlit Önbelleği
 .streamlit/secrets.toml
+
+# Uygulama Logları & Telemetri
+logs/
+*.jsonl
+
+# İşlenmiş Veriler (İsteğe bağlı/Önerilen)
+data/processed/chunks.json

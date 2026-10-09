@@ -41,7 +41,7 @@ class GroqClient:
                 print(f"[Groq Hata] Beklenmeyen hata: {e}")
                 return "Sistemsel bir hata oluştu. Lütfen sistem yöneticisi ile iletişime geçiniz."
 
-    def generate_stream(self, prompt: str, system_prompt: str = None, max_retries: int = 3) -> Generator[str, None, None]:
+    def generate_stream(self, prompt: str, system_prompt: str = None, max_retries: int = 3, max_tokens: int = 512) -> Generator[str, None, None]:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -57,9 +57,10 @@ class GroqClient:
                     stream=True,
                 )
                 for chunk in stream:
-                    content = chunk.choices[0].delta.content
-                    if content:
-                        yield content
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if delta and hasattr(delta, "content") and delta.content:
+                            yield delta.content
                 return  # Başarıyla bitti
             except (RateLimitError, APIConnectionError, InternalServerError) as e:
                 wait_time = (2 ** attempt) + 1
@@ -70,9 +71,9 @@ class GroqClient:
                 time.sleep(wait_time)
             except Exception as e:
                 print(f"[Groq Stream Hata] Beklenmeyen hata: {e}")
-                yield "⚠️ *Sorgu yanıtlanırken beklenmeyen bir hata oluştu.*"
+                yield f"⚠️ *Sorgu yanıtlanırken beklenmeyen bir hata oluştu: {str(e)}*"
                 return
-
+            
     def rewrite_query(self, query: str, history: List[Dict[str, str]]) -> str:
         """
         Geçmiş konuşmayı kullanarak örtük zamirleri/bağlamları tekil ve açık bir arama sorgusuna dönüştürür.
