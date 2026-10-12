@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Generator
 from dotenv import load_dotenv
-from src.utils.logger import AuditLogger
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -55,7 +54,7 @@ def reciprocal_rank_fusion(dense_results: List[Dict[str, Any]], bm25_results: Li
     return fused_list
 
 class RAGEngine:
-    def __init__(self, candidate_k: int = 15, final_k: int = 4, score_threshold: float = 0.10):
+    def __init__(self, candidate_k: int = 20, final_k: int = 4, score_threshold: float = 0.10):
         self.candidate_k = candidate_k
         self.final_k = final_k
         self.score_threshold = score_threshold
@@ -119,10 +118,14 @@ class RAGEngine:
                 f"[Kaynak {i}] Belge: {hit['document_name']} | Madde: {hit['article']} (Sayfa: {hit['page_start']})\n"
                 f"Metin: {hit['text']}\n"
             )
+            page_info = str(hit.get('page_start', ''))
+            if hit.get('page_end') and hit.get('page_end') != hit.get('page_start'):
+                page_info = f"{hit['page_start']}-{hit['page_end']}"
+
             ui_sources.append({
                 "source": hit["document_name"],
                 "madde": hit["article"],
-                "pages": f"{hit['page_start']} - {hit['page_end']}",
+                "pages": page_info,
                 "score": hit.get("rerank_score", 0.0),
                 "text": hit["text"]
             })
@@ -140,9 +143,9 @@ class RAGEngine:
         return system_prompt, user_prompt, ui_sources
 
     def answer_query(self, query: str, source_filter: str = None, chat_history: Optional[List[Dict[str, str]]] = None):
-        start_time = time.time()
         search_query = query
-        if chat_history:
+        # Fast-Path: Sohbet geçmişi yoksa LLM rewriter adımını doğrudan atla
+        if chat_history and len(chat_history) > 0:
             search_query = self.llm.rewrite_query(query=query, history=chat_history)
             if search_query != query:
                 print(f"[Query Rewriter] Orijinal: '{query}' -> Yeniden Yazılan: '{search_query}'")
@@ -152,16 +155,6 @@ class RAGEngine:
 
         # Eşik kontrolü
         if not hits or top_score < self.score_threshold:
-            latency = time.time() - start_time
-            AuditLogger.log_query(
-                query=query,
-                rewritten_query=search_query,
-                latency_sec=latency,
-                is_in_scope=False,
-                top_score=top_score,
-                sources=[],
-                doc_filter=source_filter
-            )
             return {
                 "answer": "Bu soru ODTÜ akademik mevzuatı kapsamında yer almamaktadır. Lütfen yönetmelikler, yönergeler, kayıt, sınav, burs veya yurt süreçleriyle ilgili bir soru sorunuz.",
                 "sources": [],
@@ -170,17 +163,6 @@ class RAGEngine:
 
         system_prompt, user_prompt, ui_sources = self._prepare_prompt(query, hits)
         answer = self.llm.generate(prompt=user_prompt, system_prompt=system_prompt)
-        
-        latency = time.time() - start_time
-        AuditLogger.log_query(
-            query=query,
-            rewritten_query=search_query,
-            latency_sec=latency,
-            is_in_scope=True,
-            top_score=top_score,
-            sources=ui_sources,
-            doc_filter=source_filter
-        )
 
         return {
             "answer": answer,
@@ -189,9 +171,9 @@ class RAGEngine:
         }
 
     def answer_query_stream(self, query: str, source_filter: str = None, chat_history: Optional[List[Dict[str, str]]] = None):
-        start_time = time.time()
         search_query = query
-        if chat_history:
+        # Fast-Path: Sohbet geçmişi yoksa LLM rewriter adımını doğrudan atla
+        if chat_history and len(chat_history) > 0:
             search_query = self.llm.rewrite_query(query=query, history=chat_history)
             if search_query != query:
                 print(f"[Query Rewriter] Orijinal: '{query}' -> Yeniden Yazılan: '{search_query}'")
@@ -201,32 +183,11 @@ class RAGEngine:
 
         # Eşik kontrolü
         if not hits or top_score < self.score_threshold:
-            latency = time.time() - start_time
-            AuditLogger.log_query(
-                query=query,
-                rewritten_query=search_query,
-                latency_sec=latency,
-                is_in_scope=False,
-                top_score=top_score,
-                sources=[],
-                doc_filter=source_filter
-            )
             def out_of_scope_generator():
                 yield "Bu soru ODTÜ akademik mevzuatı kapsamında yer almamaktadır. Lütfen yönetmelikler, yönergeler, kayıt, sınav, burs veya yurt süreçleriyle ilgili bir soru sorunuz."
             return out_of_scope_generator(), [], search_query
 
         system_prompt, user_prompt, ui_sources = self._prepare_prompt(query, hits)
         stream_generator = self.llm.generate_stream(prompt=user_prompt, system_prompt=system_prompt)
-
-        latency = time.time() - start_time
-        AuditLogger.log_query(
-            query=query,
-            rewritten_query=search_query,
-            latency_sec=latency,
-            is_in_scope=True,
-            top_score=top_score,
-            sources=ui_sources,
-            doc_filter=source_filter
-        )
 
         return stream_generator, ui_sources, search_query

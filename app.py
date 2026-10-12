@@ -1,5 +1,7 @@
 import sys
 import json
+import time
+import threading
 from pathlib import Path
 import requests
 import streamlit as st
@@ -17,7 +19,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Kapsam Filtresi için Mevzuat Dokümanı
+# Kapsam Filtresi için Mevzuat Dokümanı (data/raw ile birebir senkronize 22 PDF)
 ALL_DOCUMENTS = [
     "Tüm Mevzuat",
     "akademik_durustluk_kilavuzu.pdf",
@@ -44,11 +46,11 @@ ALL_DOCUMENTS = [
     "yurtlar_yonetmeligi.pdf"
 ]
 
-def check_api_health():
-    """Backend servisinin ayakta olup olmadığını kontrol eder."""
+def check_api_health() -> bool:
+    """Backend servisinin ayakta olup olmadığını sıkı şekilde doğrular."""
     try:
-        res = requests.get(f"{API_BASE_URL}/health", timeout=2)
-        return res.status_code == 200
+        res = requests.get(f"{API_BASE_URL}/health", timeout=1.0)
+        return res.status_code == 200 and res.json().get("status") == "ok"
     except Exception:
         return False
 
@@ -108,7 +110,7 @@ with st.sidebar:
 
     st.title("Sistem Ayarları")
 
-    # API Durum Göstergesi (Arka plansız, sadece metin rengi)
+    # API Durum Göstergesi
     api_online = check_api_health()
     if api_online:
         st.markdown(
@@ -123,7 +125,7 @@ with st.sidebar:
             unsafe_allow_html=True
         )
 
-    # Güncellenmiş Kapsam Filtresi
+    # Kapsam Filtresi
     doc_filter = st.selectbox(
         "Kapsam Filtresi",
         options=ALL_DOCUMENTS,
@@ -214,7 +216,14 @@ def sse_stream_generator(query: str, source_filter: str | None, history: list, r
                 elif line.startswith("data:"):
                     raw_data = line.replace("data:", "").strip()
 
-                    if current_event == "metadata":
+                    if current_event == "status":
+                        try:
+                            s_data = json.loads(raw_data)
+                            response_holder["status_text"] = s_data.get("text", "")
+                        except Exception:
+                            pass
+
+                    elif current_event == "metadata":
                         try:
                             meta = json.loads(raw_data)
                             response_holder["sources"] = meta.get("sources", [])
@@ -248,27 +257,48 @@ def sse_stream_generator(query: str, source_filter: str | None, history: list, r
 
 # Yeni Soru Girişi
 if user_prompt := st.chat_input("Mevzuatla ilgili sorunuzu buraya yazın..."):
-    if not api_online:
+    if not check_api_health():
         st.error("FastAPI backend servisi kapalı olduğu için sorgu gönderilemedi. Lütfen sunucuyu başlatın.")
     else:
         # 1. Kullanıcı mesajını arayüze ekle
         st.chat_message("user").markdown(user_prompt)
         st.session_state.messages.append({"role": "user", "content": user_prompt})
 
-        # 2. Asistan cevabını canlı (streaming) oluştur
+        # 2. Asistan cevabını oluştur
         with st.chat_message("assistant"):
-            response_holder = {"sources": [], "rewritten_query": user_prompt}
+            response_holder = {
+                "sources": [],
+                "rewritten_query": user_prompt,
+                "status_text": "🔍 Soru analiz ediliyor ve mevzuat taranıyor..."
+            }
+            status_box = st.empty()
 
-            with st.spinner("Mevzuat taranıyor ve bağlam oluşturuluyor..."):
-                token_stream = sse_stream_generator(
-                    query=user_prompt,
-                    source_filter=selected_doc,
-                    history=st.session_state.messages[:-1],
-                    response_holder=response_holder
-                )
+            token_stream = sse_stream_generator(
+                query=user_prompt,
+                source_filter=selected_doc,
+                history=st.session_state.messages[:-1],
+                response_holder=response_holder
+            )
 
-                # Yanıtı ekrana token token canlı akıt
-                full_response = st.write_stream(token_stream)
+            # İlk aşama durum yazısını bas
+            status_box.markdown(
+                f'<div style="color: #6c757d; font-size: 0.92rem; padding: 4px 0; margin-bottom: 8px;">{response_holder["status_text"]}</div>',
+                unsafe_allow_html=True
+            )
+
+            def monitored_stream():
+                has_first_token = False
+                for token in token_stream:
+                    if not has_first_token:
+                        status_box.empty()  # İlk token geldiğinde bekleme satırını tamamen sil
+                        has_first_token = True
+                    yield token
+
+                status_box.empty()
+
+            # Yanıtı ekrana token token canlı akıt
+            full_response = st.write_stream(monitored_stream())
+            status_box.empty()
 
             # Yeniden yazılmış sorgu varsa göster
             rewritten = response_holder.get("rewritten_query")

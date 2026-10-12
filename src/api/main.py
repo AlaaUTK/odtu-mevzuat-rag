@@ -27,9 +27,10 @@ from src.api.schemas import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Uygulama başlarken RAG motorunu tek sefer yükle (Singleton)
+    # Aday sayısı candidate_k=20 olarak optimize edildi (Cross-Encoder hız kazancı)
     print("\n--- [FastAPI] RAG Motoru Yükleniyor (Singleton) ---")
     app.state.rag_engine = RAGEngine(
-        candidate_k=30,
+        candidate_k=20,
         final_k=4,
         score_threshold=0.10
     )
@@ -155,6 +156,20 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
         top_score = 0.0
 
         try:
+            # Durum 1: Başlangıç
+            yield {
+                "event": "status",
+                "data": json.dumps({"text": "🔍 Soru analiz ediliyor ve bağlam çözümleniyor..."}, ensure_ascii=False)
+            }
+            await asyncio.sleep(0.01)
+
+            # Durum 2: Arama
+            yield {
+                "event": "status",
+                "data": json.dumps({"text": "📚 22 ODTÜ mevzuatında hibrit arama (Dense + Sparse) yürütülüyor..."}, ensure_ascii=False)
+            }
+            await asyncio.sleep(0.01)
+
             stream_gen, ui_sources, rewritten_query = rag_engine.answer_query_stream(
                 query=request_data.query,
                 source_filter=request_data.source_filter,
@@ -175,6 +190,13 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
                 "event": "metadata",
                 "data": json.dumps(metadata_payload, ensure_ascii=False)
             }
+
+            # Durum 3: Yanıt üretimi
+            yield {
+                "event": "status",
+                "data": json.dumps({"text": "✍️ Mevzuat hükümleri derleniyor ve yanıt yazılıyor..."}, ensure_ascii=False)
+            }
+            await asyncio.sleep(0.01)
 
             # 2. Aşama: Token Akışı
             for token in stream_gen:
