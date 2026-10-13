@@ -1,6 +1,7 @@
 # Gizli Çevre Değişkenleri ve Anahtarlar
 .env
 *.env
+.env.local
 
 # Python & Sanal Ortam
 __pycache__/
@@ -10,10 +11,13 @@ __pycache__/
 venv/
 .venv/
 env/
+ENV/
 
-# IDE Yapılandırmaları
+# IDE & İşletim Sistemi Kalıntıları
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
 
 # Veri Tabanı, Docker Kalıntıları ve Cache
 data/chroma_db/
@@ -24,9 +28,10 @@ clickhouse_data/
 # Streamlit Önbelleği
 .streamlit/secrets.toml
 
-# Uygulama Logları & Telemetri
-logs/
-*.jsonl
+# Uygulama Logları & Telemetri (Klasör kalsın, log dosyaları gitmesin)
+logs/*.jsonl
+logs/*.log
+*.log
 
-# İşlenmiş Veriler (İsteğe bağlı/Önerilen)
+# İşlenmiş Veriler (İsteğe bağlı)
 data/processed/chunks.json
