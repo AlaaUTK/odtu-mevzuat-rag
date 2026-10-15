@@ -11,6 +11,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
 API_BASE_URL = "http://127.0.0.1:8000"
+LOG_FILE_PATH = BASE_DIR / "logs" / "api_queries.jsonl"
 
 st.set_page_config(
     page_title="ODTÜ Mevzuat Danışmanı",
@@ -76,7 +77,65 @@ def check_api_health() -> bool:
     except Exception:
         return False
 
-# Kurumsal Stil ve Menü Vurgusu (Dark/Light Uyumlu CSS)
+def load_telemetry_metrics():
+    """logs/api_queries.jsonl dosyasını okuyup metrik ve özet listeyi çıkarır."""
+    if not LOG_FILE_PATH.exists():
+        return {
+            "total_queries": 0,
+            "avg_latency": 0.0,
+            "success_rate": 100.0,
+            "max_score": 0.0,
+            "avg_score": 0.0,
+            "recent_logs": []
+        }
+
+    records = []
+    try:
+        with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        records.append(json.loads(line))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+    if not records:
+        return {
+            "total_queries": 0,
+            "avg_latency": 0.0,
+            "success_rate": 100.0,
+            "max_score": 0.0,
+            "avg_score": 0.0,
+            "recent_logs": []
+        }
+
+    total_queries = len(records)
+    latencies = [r.get("latency_ms", 0) for r in records if "latency_ms" in r]
+    avg_latency = (sum(latencies) / len(latencies)) / 1000.0 if latencies else 0.0  # saniye cinsinden
+
+    success_count = sum(1 for r in records if r.get("status") == "SUCCESS")
+    success_rate = (success_count / total_queries) * 100.0 if total_queries > 0 else 100.0
+
+    scores = [r.get("top_score", 0.0) for r in records if r.get("top_score") is not None]
+    max_score = max(scores) if scores else 0.0
+    avg_score = (sum(scores) / len(scores)) if scores else 0.0
+
+    # Son 15 sorguyu ters sırala (en güncel en üstte)
+    recent_logs = records[-15:][::-1]
+
+    return {
+        "total_queries": total_queries,
+        "avg_latency": avg_latency,
+        "success_rate": success_rate,
+        "max_score": max_score,
+        "avg_score": avg_score,
+        "recent_logs": recent_logs
+    }
+
+# Kurumsal Stil ve Menü Vurgusu (Dark Mode CSS)
 st.markdown("""
 <style>
     .page-title {
@@ -124,14 +183,34 @@ st.markdown("""
         font-style: italic;
     }
     
-    /* Sıkça Sorulan Sorular Kartları */
-    .faq-card {
+    /* Kart Temel Yapısı */
+    .faq-card, .metric-card, .table-card {
         background-color: #1a1d24;
         border: 1px solid #2a2e39;
         border-radius: 6px;
         padding: 16px;
         margin-bottom: 12px;
+        box-sizing: border-box;
     }
+
+    .metric-card {
+        text-align: center;
+        padding: 18px 10px;
+    }
+    .metric-val {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #f3f4f6;
+        margin-bottom: 4px;
+    }
+    .metric-lbl {
+        font-size: 0.82rem;
+        color: #9ca3af;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
     .faq-badge {
         font-size: 0.75rem;
         background-color: #2a2e39;
@@ -154,7 +233,7 @@ st.markdown("""
         line-height: 1.45;
     }
 
-    /* Hakkında Kartları (Koyu Mat Gri ve Birebir Eşit Yükseklik) */
+    /* Hakkında Kartları */
     .about-card {
         background-color: #1a1d24;
         border: 1px solid #2a2e39;
@@ -164,12 +243,12 @@ st.markdown("""
         box-sizing: border-box;
     }
     .about-card-top {
-        height: 270px;
-        overflow-y: auto;
+        min-height: 270px;
+        box-sizing: border-box;
     }
     .about-card-bottom {
-        height: 260px;
-        overflow-y: auto;
+        min-height: 260px;
+        box-sizing: border-box;
     }
     .about-card h3 {
         color: #ff6b81;
@@ -183,7 +262,30 @@ st.markdown("""
         line-height: 1.5;
     }
 
-    /* Sidebar Navigasyon Buton Görünümü - Daire/Tik Tamamen Gizlendi */
+    /* Tablo Görünümü */
+    .custom-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.86rem;
+        color: #d1d5db;
+    }
+    .custom-table th {
+        background-color: #21252d;
+        color: #ff6b81;
+        padding: 10px 12px;
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 1px solid #2a2e39;
+    }
+    .custom-table td {
+        padding: 9px 12px;
+        border-bottom: 1px solid #222630;
+    }
+    .custom-table tr:hover {
+        background-color: #1f232c;
+    }
+
+    /* Sidebar Navigasyon Buton Görünümü */
     div[data-testid="stRadio"] div[role="radiogroup"] {
         gap: 6px;
     }
@@ -200,14 +302,12 @@ st.markdown("""
     div[data-testid="stRadio"] label:hover {
         background-color: #21252d !important;
     }
-    /* Streamlit'in radyo dairesini ve ikonunu tamamen yok et */
     div[data-testid="stRadio"] label div[data-testid="stMarkdownContainer"] {
         margin-left: 0 !important;
     }
     div[data-testid="stRadio"] label > div:first-child {
         display: none !important;
     }
-    /* Aktif olan sekmenin arka planını hafif aydınlık füme yap, soluna kırmızı çizgi çek */
     div[data-testid="stRadio"] label:has(input:checked) {
         background-color: #272c36 !important;
         border-left: 3px solid #D31145 !important;
@@ -234,10 +334,10 @@ with st.sidebar:
 
     st.markdown("### ODTÜ Danışmanı")
     
-    # Doğrudan st.session_state.current_nav anahtarına bağlı gecikmesiz radyo menü
+    # 4 Sekmeli Navigasyon (Sistem Metrikleri 3. sırada)
     st.radio(
         "Menü",
-        options=["Sohbet", "Sıkça Sorulan Sorular", "Hakkında & Kapsam"],
+        options=["Sohbet", "Sıkça Sorulan Sorular", "Sistem Metrikleri", "Hakkında & Kapsam"],
         key="current_nav",
         label_visibility="collapsed"
     )
@@ -401,7 +501,7 @@ if st.session_state.current_nav == "Sohbet":
                         <div class="source-box">
                             <b>{s.get('source')}</b> — <b>{s.get('madde')}</b> (Sayfa: {s.get('pages')})<br>
                             <small>Uygunluk Skoru: {s.get('score', 0):.4f}</small><br>
-                            <i style="color:#495057;">"{s.get('text', '')[:250]}..."</i>
+                            <i style="color:#9ca3af;">"{s.get('text', '')[:250]}..."</i>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -465,7 +565,7 @@ if st.session_state.current_nav == "Sohbet":
                             <div class="source-box">
                                 <b>{s.get('source')}</b> — <b>{s.get('madde')}</b> (Sayfa: {s.get('pages')})<br>
                                 <small>Uygunluk Skoru: {s.get('score', 0):.4f}</small><br>
-                                <i style="color:#495057;">"{s.get('text', '')[:250]}..."</i>
+                                <i style="color:#9ca3af;">"{s.get('text', '')[:250]}..."</i>
                             </div>
                             """, unsafe_allow_html=True)
 
@@ -499,7 +599,96 @@ elif st.session_state.current_nav == "Sıkça Sorulan Sorular":
 
 
 # ==============================================================================
-# SAYFA 3: HAKKINDA & KAPSAM
+# SAYFA 3: SİSTEM METRİKLERİ (MONITORING)
+# ==============================================================================
+elif st.session_state.current_nav == "Sistem Metrikleri":
+    st.markdown('<div class="page-title">Sistem Metrikleri ve İzleme</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="page-desc">Sistem genelinde işlenen sorguların telemetri verileri, gecikme süreleri ve bilgi getirme (retrieval) başarı oranları.</div>',
+        unsafe_allow_html=True
+    )
+
+    metrics = load_telemetry_metrics()
+
+    # Üst KPI Kartları (4 Sütun)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    with kpi1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-val">{metrics['total_queries']}</div>
+            <div class="metric-lbl">Toplam Sorgu</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with kpi2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-val">{metrics['avg_latency']:.2f} s</div>
+            <div class="metric-lbl">Ort. Gecikme (Latency)</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with kpi3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-val">%{metrics['success_rate']:.1f}</div>
+            <div class="metric-lbl">Başarı Oranı</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with kpi4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-val">{metrics['max_score']:.4f}</div>
+            <div class="metric-lbl">En Yüksek Skor</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+# Son Sorgular Listesi / Tablosu
+    st.markdown("##### Son İşlenen Sorgular ve Telemetri Kayıtları")
+
+    recent_logs = metrics["recent_logs"]
+    if not recent_logs:
+        st.info("Henüz kaydedilmiş bir sorgu telemetri verisi bulunmamaktadır.")
+    else:
+        table_data = []
+        for entry in recent_logs:
+            ts = entry.get("timestamp", "-")
+            if "T" in ts:
+                # "2026-10-14T11:26:55" formatını "11:26:55" yapar
+                ts = ts.split("T")[1][:8]
+            elif " " in ts:
+                # Boşluklu tarih gelirse saat kısmını alır
+                ts = ts.split(" ")[1][:8]
+
+            table_data.append({
+                "Zaman": ts,
+                "Kullanıcı Sorgusu": entry.get("query", "-"),
+                "Gecikme (sn)": round(entry.get("latency_ms", 0) / 1000.0, 2),
+                "Dayanak": f"{entry.get('source_count', 0)} Kaynak",
+                "Reranker Skoru": round(entry.get("top_score", 0.0), 4),
+                "Durum": entry.get("status", "SUCCESS")
+            })
+
+        st.dataframe(
+            table_data,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Zaman": st.column_config.TextColumn("Saat", width="small"),
+                "Kullanıcı Sorgusu": st.column_config.TextColumn("Kullanıcı Sorgusu", width="large"),
+                "Gecikme (sn)": st.column_config.NumberColumn("Gecikme", format="%.2f s", width="small"),
+                "Dayanak": st.column_config.TextColumn("Dayanak", width="small"),
+                "Reranker Skoru": st.column_config.NumberColumn("Reranker Skoru", format="%.4f", width="small"),
+                "Durum": st.column_config.TextColumn("Durum", width="small"),
+            }
+        )
+
+
+# ==============================================================================
+# SAYFA 4: HAKKINDA & KAPSAM
 # ==============================================================================
 elif st.session_state.current_nav == "Hakkında & Kapsam":
     st.markdown('<div class="page-title">Sistem Hakkında ve Mevzuat Kapsamı</div>', unsafe_allow_html=True)
