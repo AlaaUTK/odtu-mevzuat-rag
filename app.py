@@ -3,6 +3,7 @@ import json
 import time
 import requests
 from pathlib import Path
+from collections import Counter
 import streamlit as st
 
 # Kök dizini yola ekle
@@ -45,27 +46,53 @@ ALL_DOCUMENTS = [
     "yurtlar_yonetmeligi.pdf"
 ]
 
-# Sıkça Sorulan Sorular
-FAQ_ITEMS = [
+# Hakkında Sayfası İçin 22 Mevzuatın Detaylı Envanteri
+DOCUMENT_INVENTORY = [
+    {"No": 1, "Belge Adı": "Lisans Eğitim-Öğretim Yönetmeliği", "Kategori": "Eğitim & Öğretim", "Dosya": "lisans_yonetmeligi.pdf"},
+    {"No": 2, "Belge Adı": "Lisansüstü Eğitim-Öğretim Yönetmeliği", "Kategori": "Eğitim & Öğretim", "Dosya": "lisansustu_yonetmeligi.pdf"},
+    {"No": 3, "Belge Adı": "Tezsiz Yüksek Lisans Yönergesi", "Kategori": "Eğitim & Öğretim", "Dosya": "tezsiz_yuksek_lisans_yonergesi.pdf"},
+    {"No": 4, "Belge Adı": "İngilizce Hazırlık Sınıfı Yönetmeliği", "Kategori": "Dil & Hazırlık", "Dosya": "hazirlik_yonetmeligi.pdf"},
+    {"No": 5, "Belge Adı": "Yaz Okulu Yönergesi", "Kategori": "Eğitim & Öğretim", "Dosya": "yaz_okulu_yonergesi.pdf"},
+    {"No": 6, "Belge Adı": "Azami Öğrenim Süreleri Sonunda Verilecek Ek Süre ve Sınav Esasları", "Kategori": "Öğrenim Süresi", "Dosya": "azami_sure_esaslari.pdf"},
+    {"No": 7, "Belge Adı": "Çift Anadal Programı (ÇAP) Yönergesi", "Kategori": "Anadal & Yan Dal", "Dosya": "cap_yonergesi.pdf"},
+    {"No": 8, "Belge Adı": "Yan Dal Programı Yönergesi", "Kategori": "Anadal & Yan Dal", "Dosya": "yan_dal_yonergesi.pdf"},
+    {"No": 9, "Belge Adı": "Kurum İçi ve Kurum Dışı Yatay Geçiş Yönergesi", "Kategori": "Geçiş & İntibak", "Dosya": "yatay_gecis_yonergesi.pdf"},
+    {"No": 10, "Belge Adı": "Dikey Geçiş (DGS) Lisans Öğrenimine İntibak Yönergesi", "Kategori": "Geçiş & İntibak", "Dosya": "dikey_gecis_yonergesi.pdf"},
+    {"No": 11, "Belge Adı": "Muafiyet ve Ders Sayımı Esasları", "Kategori": "Geçiş & İntibak", "Dosya": "ders_sayimi_esaslari.pdf"},
+    {"No": 12, "Belge Adı": "Değişim Programları (Erasmus / Mevlana / Farabi) Yönergesi", "Kategori": "Değişim & Özel", "Dosya": "degisim_programlari_yonergesi.pdf"},
+    {"No": 13, "Belge Adı": "Özel Öğrenci Yönergesi", "Kategori": "Değişim & Özel", "Dosya": "ozel_ogrenci_yonergesi.pdf"},
+    {"No": 14, "Belge Adı": "Sınav Kuralları ve Uygulama Kılavuzu", "Kategori": "Sınav & Değerlendirme", "Dosya": "sinav_kurallari_kilavuzu.pdf"},
+    {"No": 15, "Belge Adı": "Bütünleme Sınavları Yönergesi", "Kategori": "Sınav & Değerlendirme", "Dosya": "butunleme_sinavlari_yonergesi.pdf"},
+    {"No": 16, "Belge Adı": "Çevrimiçi (Online) Sınav Uygulama Esasları", "Kategori": "Sınav & Değerlendirme", "Dosya": "online_sinav_esaslari.pdf"},
+    {"No": 17, "Belge Adı": "Mezuniyet Başarı Sıralaması Yönergesi", "Kategori": "Mezuniyet", "Dosya": "mezuniyet_siralama_yonergesi.pdf"},
+    {"No": 18, "Belge Adı": "Akademik Dürüstlük ve Etik Kılavuzu", "Kategori": "Disiplin & Etik", "Dosya": "akademik_durustluk_kilavuzu.pdf"},
+    {"No": 19, "Belge Adı": "Öğrenci Disiplin Yönetmeliği", "Kategori": "Disiplin & Etik", "Dosya": "ogrenci_disiplin_yonetmeligi.pdf"},
+    {"No": 20, "Belge Adı": "Öğrenci Sağlık Raporları ve Mazeret Yönergesi", "Kategori": "İdari & Sağlık", "Dosya": "saglik_raporlari_yonergesi.pdf"},
+    {"No": 21, "Belge Adı": "Burs ve Yardım Yönergesi", "Kategori": "Sosyal & Barınma", "Dosya": "burs_yardim_yonergesi.pdf"},
+    {"No": 22, "Belge Adı": "Öğrenci Yurtları Yönetmeliği", "Kategori": "Sosyal & Barınma", "Dosya": "yurtlar_yonetmeligi.pdf"}
+]
+
+# Varsayılan Yedek Sıkça Sorulan Sorular (Fallback)
+DEFAULT_FAQ_ITEMS = [
     {
         "category": "Yaz Okulu",
         "question": "Yaz okulunda en fazla kaç ders alabilirim ve başka üniversiteden ders alabilir miyim?",
-        "summary": "Öğrenciler bir yaz döneminde en fazla 2 ders alabilir. İlgili bölümün onayı ile diğer yükseköğretim kurumlarından ders alma şartları ilgili yönerge hükümleri çerçevesinde yürütülür."
+        "count": 1
     },
     {
         "category": "Öğrenim Süresi",
         "question": "4 yıllık lisans programında azami süre ne kadardır, süre bitince ek sınav hakkı verilir mi?",
-        "summary": "Azami süre 7 yıldır (14 yarıyıl). Süre sonunda mezun olamayan öğrencilere başarısız oldukları tüm dersler için iki ek sınav hakkı tanınır."
+        "count": 1
     },
     {
         "category": "Çift Anadal (ÇAP)",
         "question": "Çift anadal programına (ÇAP) başvurmak için genel not ortalaması en az kaç olmalı?",
-        "summary": "Öğrencinin başvurduğu yarıyıla kadar tüm kredili dersleri tamamlamış olması ve genel not ortalamasının en az 3.00 (veya sınıfında ilk %20 diliminde) olması gerekir."
+        "count": 1
     },
     {
         "category": "Yurt İşlemleri",
         "question": "Yurtlara kesin kayıt yaptırmak için gerekli belgeler ve şartlar nelerdir?",
-        "summary": "Kayıt takviminde ilan edilen öğrenci belgesi, adli sicil kaydı, sağlık durum beyanı ve kimlik evrakları Yurtlar Müdürlüğüne teslim edilir."
+        "count": 1
     }
 ]
 
@@ -76,6 +103,72 @@ def check_api_health() -> bool:
         return res.status_code == 200 and res.json().get("status") == "ok"
     except Exception:
         return False
+
+def get_dynamic_faq():
+    """Log dosyasından bağlamsal sorguları (rewritten_query) analiz ederek SSS listesi oluşturur."""
+    if not LOG_FILE_PATH.exists():
+        return DEFAULT_FAQ_ITEMS
+
+    valid_queries = []
+
+    try:
+        with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    status = entry.get("status", "")
+                    
+                    # Öncelik LLM'in ürettiği bağlamsal sorguda (rewritten_query), yoksa ham sorgu
+                    q = entry.get("rewritten_query") or entry.get("query", "")
+                    q = q.strip()
+                    
+                    # Filtreleme: Başarılı, en az 18 karakter, injection ve anlamsız testler elenir
+                    if (status == "SUCCESS" and 
+                        len(q) >= 18 and 
+                        "talimatlarını unut" not in q.lower() and 
+                        not all(c in "?! ." for c in q)):
+                        
+                        valid_queries.append(q)
+                except Exception:
+                    continue
+    except Exception:
+        return DEFAULT_FAQ_ITEMS
+
+    if not valid_queries:
+        return DEFAULT_FAQ_ITEMS
+
+    counts = Counter(valid_queries)
+    top_queries = counts.most_common(6)
+
+    dynamic_items = []
+    for q, count in top_queries:
+        category = "Genel Mevzuat"
+        q_lower = q.lower()
+        if "yaz okul" in q_lower:
+            category = "Yaz Okulu"
+        elif "çap" in q_lower or "çift anadal" in q_lower:
+            category = "Çift Anadal (ÇAP)"
+        elif "yurt" in q_lower:
+            category = "Yurt İşlemleri"
+        elif "yatay geçiş" in q_lower:
+            category = "Yatay Geçiş"
+        elif "azami" in q_lower or "süre" in q_lower or "ek sınav" in q_lower:
+            category = "Öğrenim Süresi"
+        elif "add-drop" in q_lower or "ders ekle" in q_lower or "çekilme" in q_lower or "withdraw" in q_lower:
+            category = "Ders Kayıt & İntibak"
+        elif "burs" in q_lower:
+            category = "Burs & Yardım"
+
+        dynamic_items.append({
+            "category": category,
+            "question": q,
+            "count": count
+        })
+
+    return dynamic_items
 
 def load_telemetry_metrics():
     """logs/api_queries.jsonl dosyasını okuyup metrik ve özet listeyi çıkarır."""
@@ -114,7 +207,7 @@ def load_telemetry_metrics():
 
     total_queries = len(records)
     latencies = [r.get("latency_ms", 0) for r in records if "latency_ms" in r]
-    avg_latency = (sum(latencies) / len(latencies)) / 1000.0 if latencies else 0.0  # saniye cinsinden
+    avg_latency = (sum(latencies) / len(latencies)) / 1000.0 if latencies else 0.0
 
     success_count = sum(1 for r in records if r.get("status") == "SUCCESS")
     success_rate = (success_count / total_queries) * 100.0 if total_queries > 0 else 100.0
@@ -123,7 +216,6 @@ def load_telemetry_metrics():
     max_score = max(scores) if scores else 0.0
     avg_score = (sum(scores) / len(scores)) if scores else 0.0
 
-    # Son 15 sorguyu ters sırala (en güncel en üstte)
     recent_logs = records[-15:][::-1]
 
     return {
@@ -184,18 +276,14 @@ st.markdown("""
     }
     
     /* Kart Temel Yapısı */
-    .faq-card, .metric-card, .table-card {
+    .metric-card {
         background-color: #1a1d24;
         border: 1px solid #2a2e39;
         border-radius: 6px;
-        padding: 16px;
-        margin-bottom: 12px;
-        box-sizing: border-box;
-    }
-
-    .metric-card {
         text-align: center;
         padding: 18px 10px;
+        margin-bottom: 12px;
+        box-sizing: border-box;
     }
     .metric-val {
         font-size: 1.8rem;
@@ -219,18 +307,16 @@ st.markdown("""
         padding: 3px 8px;
         border-radius: 4px;
         display: inline-block;
-        margin-bottom: 6px;
     }
-    .faq-title {
-        font-size: 0.98rem;
-        font-weight: 600;
-        color: #f3f4f6;
-        margin-bottom: 6px;
-    }
-    .faq-summary {
-        font-size: 0.86rem;
+    .faq-count-badge {
+        font-size: 0.75rem;
+        background-color: #21252d;
         color: #9ca3af;
-        line-height: 1.45;
+        padding: 3px 8px;
+        border-radius: 4px;
+        display: inline-block;
+        margin-left: 6px;
+        border: 1px solid #2d3139;
     }
 
     /* Hakkında Kartları */
@@ -241,14 +327,7 @@ st.markdown("""
         padding: 20px;
         margin-bottom: 18px;
         box-sizing: border-box;
-    }
-    .about-card-top {
-        min-height: 270px;
-        box-sizing: border-box;
-    }
-    .about-card-bottom {
-        min-height: 260px;
-        box-sizing: border-box;
+        min-height: 210px;
     }
     .about-card h3 {
         color: #ff6b81;
@@ -260,29 +339,6 @@ st.markdown("""
         font-size: 0.86rem;
         color: #d1d5db;
         line-height: 1.5;
-    }
-
-    /* Tablo Görünümü */
-    .custom-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.86rem;
-        color: #d1d5db;
-    }
-    .custom-table th {
-        background-color: #21252d;
-        color: #ff6b81;
-        padding: 10px 12px;
-        text-align: left;
-        font-weight: 600;
-        border-bottom: 1px solid #2a2e39;
-    }
-    .custom-table td {
-        padding: 9px 12px;
-        border-bottom: 1px solid #222630;
-    }
-    .custom-table tr:hover {
-        background-color: #1f232c;
     }
 
     /* Sidebar Navigasyon Buton Görünümü */
@@ -325,6 +381,15 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "current_nav" not in st.session_state:
     st.session_state.current_nav = "Sohbet"
+if "pending_query" not in st.session_state:
+    st.session_state.pending_query = None
+if "is_generating" not in st.session_state:
+    st.session_state.is_generating = False
+
+# Navigasyon yönlendirmesi varsa widget çizilmeden önce uygula
+if "target_nav" in st.session_state and st.session_state.target_nav:
+    st.session_state.current_nav = st.session_state.target_nav
+    st.session_state.target_nav = None
 
 # Kenar Çubuğu (Sidebar)
 with st.sidebar:
@@ -334,7 +399,6 @@ with st.sidebar:
 
     st.markdown("### ODTÜ Danışmanı")
     
-    # 4 Sekmeli Navigasyon (Sistem Metrikleri 3. sırada)
     st.radio(
         "Menü",
         options=["Sohbet", "Sıkça Sorulan Sorular", "Sistem Metrikleri", "Hakkında & Kapsam"],
@@ -392,7 +456,9 @@ with st.sidebar:
 
     if st.button("Yeni Sohbet Başlat", use_container_width=True):
         st.session_state.messages = []
-        st.session_state.current_nav = "Sohbet"
+        st.session_state.pending_query = None
+        st.session_state.is_generating = False
+        st.session_state.target_nav = "Sohbet"
         st.rerun()
 
 
@@ -468,99 +534,40 @@ def sse_stream_generator(query: str, source_filter: str | None, history: list, r
         yield f"Beklenmeyen bir bağlantı hatası oluştu: {str(e)}"
 
 
+# Sayfaların üst üste binmesini (DOM Ghosting) engelleyen tekil ana konteyner
+main_canvas = st.empty()
+
 # ==============================================================================
 # SAYFA 1: SOHBET (CHAT)
 # ==============================================================================
 if st.session_state.current_nav == "Sohbet":
-    st.markdown('<div class="page-title">ODTÜ Mevzuat Danışmanı</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="page-desc">Öğrenci işleri, sınav kuralları, burslar, yurtlar ve idari yönetmelikler hakkında resmi mevzuat danışmanlığı.</div>',
-        unsafe_allow_html=True
-    )
+    main_canvas.empty()
+    with main_canvas.container():
+        st.markdown('<div class="page-title">ODTÜ Mevzuat Danışmanı</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="page-desc">Öğrenci işleri, sınav kuralları, burslar, yurtlar ve idari yönetmelikler hakkında resmi mevzuat danışmanlığı.</div>',
+            unsafe_allow_html=True
+        )
 
-    # Sohbet Akışı
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            if msg["role"] == "assistant" and msg.get("rewritten_query"):
-                st.markdown(
-                    f"""<div class="rewritten-query-box">
-                    <details>
-                        <summary>Aranan Bağlamsal Sorgu</summary>
-                        <p>{msg["rewritten_query"]}</p>
-                    </details>
-                    </div>""",
-                    unsafe_allow_html=True
-                )
-
-            st.markdown(msg["content"])
-
-            if "sources" in msg and msg["sources"]:
-                with st.expander("Dayanak Alınan Mevzuat Maddeleri", expanded=False):
-                    for s in msg["sources"]:
-                        st.markdown(f"""
-                        <div class="source-box">
-                            <b>{s.get('source')}</b> — <b>{s.get('madde')}</b> (Sayfa: {s.get('pages')})<br>
-                            <small>Uygunluk Skoru: {s.get('score', 0):.4f}</small><br>
-                            <i style="color:#9ca3af;">"{s.get('text', '')[:250]}..."</i>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-    # Giriş Denetimi (Chat Input)
-    if active_prompt := st.chat_input("Mevzuatla ilgili sorunuzu yazınız..."):
-        if not check_api_health():
-            st.error("FastAPI backend servisi kapalı olduğu için sorgu iletilemedi. Lütfen sunucuyu başlatınız.")
-        else:
-            st.chat_message("user").markdown(active_prompt)
-            st.session_state.messages.append({"role": "user", "content": active_prompt})
-
-            with st.chat_message("assistant"):
-                response_holder = {
-                    "sources": [],
-                    "rewritten_query": active_prompt,
-                    "status_text": "Mevzuat belgeleri taranıyor..."
-                }
-                status_box = st.empty()
-
-                token_stream = sse_stream_generator(
-                    query=active_prompt,
-                    source_filter=selected_doc,
-                    history=st.session_state.messages[:-1],
-                    response_holder=response_holder
-                )
-
-                status_box.markdown(
-                    f'<div style="color: #6c757d; font-size: 0.90rem; padding: 4px 0; margin-bottom: 8px;">{response_holder["status_text"]}</div>',
-                    unsafe_allow_html=True
-                )
-
-                def monitored_stream():
-                    has_first_token = False
-                    for token in token_stream:
-                        if not has_first_token:
-                            status_box.empty()
-                            has_first_token = True
-                        yield token
-                    status_box.empty()
-
-                full_response = st.write_stream(monitored_stream())
-                status_box.empty()
-
-                rewritten = response_holder.get("rewritten_query")
-                if rewritten and rewritten.strip().lower() != active_prompt.strip().lower():
+        # Mevcut mesaj geçmişini çiz
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                if msg["role"] == "assistant" and msg.get("rewritten_query"):
                     st.markdown(
                         f"""<div class="rewritten-query-box">
-                        <details open>
+                        <details>
                             <summary>Aranan Bağlamsal Sorgu</summary>
-                            <p>{rewritten}</p>
+                            <p>{msg["rewritten_query"]}</p>
                         </details>
                         </div>""",
                         unsafe_allow_html=True
                     )
 
-                sources = response_holder.get("sources", [])
-                if sources:
+                st.markdown(msg["content"])
+
+                if "sources" in msg and msg["sources"]:
                     with st.expander("Dayanak Alınan Mevzuat Maddeleri", expanded=False):
-                        for s in sources:
+                        for s in msg["sources"]:
                             st.markdown(f"""
                             <div class="source-box">
                                 <b>{s.get('source')}</b> — <b>{s.get('madde')}</b> (Sayfa: {s.get('pages')})<br>
@@ -569,179 +576,245 @@ if st.session_state.current_nav == "Sohbet":
                             </div>
                             """, unsafe_allow_html=True)
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": full_response,
-                "sources": response_holder.get("sources", []),
-                "rewritten_query": response_holder.get("rewritten_query") if response_holder.get("rewritten_query") != active_prompt else None
-            })
+        # AŞAMA 1: SSS'den gelen bekleyen sorgu varsa önce mesajlara ekle ve DOM'u tamamen temizlemek için 1 kez rerun yap
+        if st.session_state.pending_query:
+            q_text = st.session_state.pending_query
+            st.session_state.pending_query = None
+            st.session_state.messages.append({"role": "user", "content": q_text})
+            st.session_state.is_generating = True
+            st.rerun()
+
+        # AŞAMA 2: Ekran temizlendikten sonra yanıt üretimi (is_generating aktifse)
+        if st.session_state.is_generating and st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+            latest_query = st.session_state.messages[-1]["content"]
+            if not check_api_health():
+                st.error("FastAPI backend servisi kapalı olduğu için sorgu iletilemedi. Lütfen sunucuyu başlatınız.")
+                st.session_state.is_generating = False
+            else:
+                with st.chat_message("assistant"):
+                    response_holder = {
+                        "sources": [],
+                        "rewritten_query": latest_query,
+                        "status_text": "Mevzuat belgeleri taranıyor..."
+                    }
+                    status_box = st.empty()
+
+                    token_stream = sse_stream_generator(
+                        query=latest_query,
+                        source_filter=selected_doc,
+                        history=st.session_state.messages[:-1],
+                        response_holder=response_holder
+                    )
+
+                    status_box.markdown(
+                        f'<div style="color: #6c757d; font-size: 0.90rem; padding: 4px 0; margin-bottom: 8px;">{response_holder["status_text"]}</div>',
+                        unsafe_allow_html=True
+                    )
+
+                    def monitored_stream():
+                        has_first_token = False
+                        for token in token_stream:
+                            if not has_first_token:
+                                status_box.empty()
+                                has_first_token = True
+                            yield token
+                        status_box.empty()
+
+                    full_response = st.write_stream(monitored_stream())
+                    status_box.empty()
+
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": full_response,
+                    "sources": response_holder.get("sources", []),
+                    "rewritten_query": response_holder.get("rewritten_query") if response_holder.get("rewritten_query") != latest_query else None
+                })
+                st.session_state.is_generating = False
+                st.rerun()
+
+    # Chat Input (Ana konteynerin altında sabit)
+    if active_prompt := st.chat_input("Mevzuatla ilgili sorunuzu yazınız..."):
+        if not check_api_health():
+            st.error("FastAPI backend servisi kapalı olduğu için sorgu iletilemedi. Lütfen sunucuyu başlatınız.")
+        else:
+            st.session_state.messages.append({"role": "user", "content": active_prompt})
+            st.session_state.is_generating = True
             st.rerun()
 
 
 # ==============================================================================
-# SAYFA 2: SIKÇA SORULAN SORULAR (FAQ)
+# SAYFA 2: SIKÇA SORULAN SORULAR (DİNAMİK TELEMETRİ / LOG TABANLI FAQ)
 # ==============================================================================
 elif st.session_state.current_nav == "Sıkça Sorulan Sorular":
-    st.markdown('<div class="page-title">Sıkça Sorulan Sorular</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="page-desc">Öğrencilerin ve personelin sıklıkla karşılaştığı mevzuat durumları ve ilgili düzenlemelerin kısa özetleri.</div>',
-        unsafe_allow_html=True
-    )
+    main_canvas.empty()
+    with main_canvas.container():
+        st.markdown('<div class="page-title">Sıkça Sorulan Sorular</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="page-desc">Sisteme yöneltilen sorguların bağlamsal analizleri derlenmiştir. Dilediğiniz soruyu tek tıkla doğrudan asistanımıza yöneltebilirsiniz.</div>',
+            unsafe_allow_html=True
+        )
 
-    for item in FAQ_ITEMS:
-        st.markdown(f"""
-        <div class="faq-card">
-            <span class="faq-badge">{item['category']}</span>
-            <div class="faq-title">{item['question']}</div>
-            <div class="faq-summary">{item['summary']}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        faq_list = get_dynamic_faq()
+
+        for idx, item in enumerate(faq_list):
+            with st.container(border=True):
+                col_text, col_btn = st.columns([5, 1.2], vertical_alignment="center")
+                
+                with col_text:
+                    st.markdown(f"""
+                    <div style="padding: 6px 0 10px 0;">
+                        <span class="faq-badge">{item['category']}</span>
+                        <span class="faq-count-badge">Talep Frekansı: {item['count']} kez</span>
+                        <div style="font-size: 0.96rem; font-weight: 600; color: #f3f4f6; margin-top: 8px; margin-bottom: 4px; line-height: 1.45;">
+                            {item['question']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with col_btn:
+                    if st.button(
+                        "Bu Soruyu Sor ↗",
+                        key=f"faq_btn_{idx}",
+                        help="Soruyu doğrudan sohbet ekranına aktarır ve yanıtlatır.",
+                        use_container_width=True
+                    ):
+                        st.session_state.pending_query = item['question']
+                        st.session_state.target_nav = "Sohbet"
+                        st.rerun()
 
 
 # ==============================================================================
 # SAYFA 3: SİSTEM METRİKLERİ (MONITORING)
 # ==============================================================================
 elif st.session_state.current_nav == "Sistem Metrikleri":
-    st.markdown('<div class="page-title">Sistem Metrikleri ve İzleme</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="page-desc">Sistem genelinde işlenen sorguların telemetri verileri, gecikme süreleri ve bilgi getirme (retrieval) başarı oranları.</div>',
-        unsafe_allow_html=True
-    )
-
-    metrics = load_telemetry_metrics()
-
-    # Üst KPI Kartları (4 Sütun)
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val">{metrics['total_queries']}</div>
-            <div class="metric-lbl">Toplam Sorgu</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with kpi2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val">{metrics['avg_latency']:.2f} s</div>
-            <div class="metric-lbl">Ort. Gecikme (Latency)</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with kpi3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val">%{metrics['success_rate']:.1f}</div>
-            <div class="metric-lbl">Başarı Oranı</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with kpi4:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val">{metrics['max_score']:.4f}</div>
-            <div class="metric-lbl">En Yüksek Skor</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-# Son Sorgular Listesi / Tablosu
-    st.markdown("##### Son İşlenen Sorgular ve Telemetri Kayıtları")
-
-    recent_logs = metrics["recent_logs"]
-    if not recent_logs:
-        st.info("Henüz kaydedilmiş bir sorgu telemetri verisi bulunmamaktadır.")
-    else:
-        table_data = []
-        for entry in recent_logs:
-            ts = entry.get("timestamp", "-")
-            if "T" in ts:
-                # "2026-10-14T11:26:55" formatını "11:26:55" yapar
-                ts = ts.split("T")[1][:8]
-            elif " " in ts:
-                # Boşluklu tarih gelirse saat kısmını alır
-                ts = ts.split(" ")[1][:8]
-
-            table_data.append({
-                "Zaman": ts,
-                "Kullanıcı Sorgusu": entry.get("query", "-"),
-                "Gecikme (sn)": round(entry.get("latency_ms", 0) / 1000.0, 2),
-                "Dayanak": f"{entry.get('source_count', 0)} Kaynak",
-                "Reranker Skoru": round(entry.get("top_score", 0.0), 4),
-                "Durum": entry.get("status", "SUCCESS")
-            })
-
-        st.dataframe(
-            table_data,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Zaman": st.column_config.TextColumn("Saat", width="small"),
-                "Kullanıcı Sorgusu": st.column_config.TextColumn("Kullanıcı Sorgusu", width="large"),
-                "Gecikme (sn)": st.column_config.NumberColumn("Gecikme", format="%.2f s", width="small"),
-                "Dayanak": st.column_config.TextColumn("Dayanak", width="small"),
-                "Reranker Skoru": st.column_config.NumberColumn("Reranker Skoru", format="%.4f", width="small"),
-                "Durum": st.column_config.TextColumn("Durum", width="small"),
-            }
+    main_canvas.empty()
+    with main_canvas.container():
+        st.markdown('<div class="page-title">Sistem Metrikleri ve İzleme</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="page-desc">Sistem genelinde işlenen sorguların telemetri verileri, gecikme süreleri ve bilgi getirme (retrieval) başarı oranları.</div>',
+            unsafe_allow_html=True
         )
+
+        metrics = load_telemetry_metrics()
+
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        with kpi1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-val">{metrics['total_queries']}</div>
+                <div class="metric-lbl">Toplam Sorgu</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-val">{metrics['avg_latency']:.2f} s</div>
+                <div class="metric-lbl">Ort. Gecikme (Latency)</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi3:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-val">%{metrics['success_rate']:.1f}</div>
+                <div class="metric-lbl">Başarı Oranı</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with kpi4:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-val">{metrics['max_score']:.4f}</div>
+                <div class="metric-lbl">En Yüksek Skor</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        st.markdown("##### Son İşlenen Sorgular ve Telemetri Kayıtları")
+
+        recent_logs = metrics["recent_logs"]
+        if not recent_logs:
+            st.info("Henüz kaydedilmiş bir sorgu telemetri verisi bulunmamaktadır.")
+        else:
+            table_data = []
+            for entry in recent_logs:
+                ts = entry.get("timestamp", "-")
+                if "T" in ts:
+                    ts = ts.split("T")[1][:8]
+                elif " " in ts:
+                    ts = ts.split(" ")[1][:8]
+
+                table_data.append({
+                    "Zaman": ts,
+                    "Kullanıcı Sorgusu": entry.get("query", "-"),
+                    "Gecikme (sn)": round(entry.get("latency_ms", 0) / 1000.0, 2),
+                    "Dayanak": f"{entry.get('source_count', 0)} Kaynak",
+                    "Reranker Skoru": round(entry.get("top_score", 0.0), 4),
+                    "Durum": entry.get("status", "SUCCESS")
+                })
+
+            st.dataframe(
+                table_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Zaman": st.column_config.TextColumn("Saat", width="small"),
+                    "Kullanıcı Sorgusu": st.column_config.TextColumn("Kullanıcı Sorgusu", width="large"),
+                    "Gecikme (sn)": st.column_config.NumberColumn("Gecikme", format="%.2f s", width="small"),
+                    "Dayanak": st.column_config.TextColumn("Dayanak", width="small"),
+                    "Reranker Skoru": st.column_config.NumberColumn("Reranker Skoru", format="%.4f", width="small"),
+                    "Durum": st.column_config.TextColumn("Durum", width="small"),
+                }
+            )
 
 
 # ==============================================================================
 # SAYFA 4: HAKKINDA & KAPSAM
 # ==============================================================================
 elif st.session_state.current_nav == "Hakkında & Kapsam":
-    st.markdown('<div class="page-title">Sistem Hakkında ve Mevzuat Kapsamı</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="page-desc">ODTÜ Mevzuat Danışmanı mimarisi, bilgi kaynakları ve doğruluk ilkeleri.</div>',
-        unsafe_allow_html=True
-    )
+    main_canvas.empty()
+    with main_canvas.container():
+        st.markdown('<div class="page-title">Sistem Hakkında ve Mevzuat Kapsamı</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="page-desc">ODTÜ Mevzuat Danışmanı mimarisi, doğruluk ilkeleri ve veri tabanında indekslenen 22 resmi mevzuat dokümanının tam listesi.</div>',
+            unsafe_allow_html=True
+        )
 
-    c1, c2 = st.columns(2)
+        c1, c2 = st.columns(2)
 
-    with c1:
-        st.markdown("""
-        <div class="about-card about-card-top">
-            <h3>Doğrulanabilirlik ve Halüsinasyon Koruması</h3>
-            <p>Sistem, serbest veya uydurma yanıtlar üretmez. Yalnızca üniversite senatosu ve yetkili yönetim kurulları tarafından yürürlüğe konulmuş resmi mevzuat maddelerini kaynak kabul eder.</p>
-            <p>Üretilen her yanıtta dayanak alınan PDF adı, ilgili madde numarası ve sayfa bilgisi kullanıcıya şeffaf bir biçimde raporlanır.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        with c1:
+            st.markdown("""
+            <div class="about-card">
+                <h3>Doğrulanabilirlik ve Halüsinasyon Koruması</h3>
+                <p>Sistem, serbest veya uydurma yanıtlar üretmez. Yalnızca üniversite senatosu ve yetkili yönetim kurulları tarafından yürürlüğe konulmuş resmi mevzuat maddelerini kaynak kabul eder.</p>
+                <p>Üretilen her yanıtta dayanak alınan PDF adı, ilgili madde numarası ve sayfa bilgisi kullanıcıya şeffaf bir biçimde raporlanır.</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("""
-        <div class="about-card about-card-bottom">
-            <h3>Sorgulama Tavsiyeleri</h3>
-            <ul>
-                <li>Durumunuzu belirten net sorular yöneltin (Örn: <i>"2. sınıf öğrencisiyim, yaz okulunda kaç ders alabilirim?"</i>).</li>
-                <li>Sorunuz tek bir alanı ilgilendiriyorsa sol menüdeki <b>Mevzuat Kapsam Filtresi</b> üzerinden ilgili yönergeyi seçerek aramayı daraltabilirsiniz.</li>
-                <li>Yaptığınız resmi yazışmaları sol menüdeki <b>Sohbeti Dışa Aktar</b> butonuyla Markdown formatında indirebilirsiniz.</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
+        with c2:
+            st.markdown("""
+            <div class="about-card">
+                <h3>Teknik Altyapı ve Sorgulama</h3>
+                <p>
+                    <b>Arama Katmanı:</b> ClickHouse Vektör DB + BM25 Hibrit Geri Getirme<br>
+                    <b>Sıralama (Reranker):</b> BAAI/bge-reranker-v2-m3<br>
+                    <b>Üretim Modeli:</b> Groq Qwen 2.5 32B (SSE Canlı Akış Protokolü)<br>
+                    <b>Kapsam Filtresi:</b> Sol menüden belirli bir yönerge seçilerek arama daraltılabilir.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
 
-    with c2:
-        st.markdown("""
-        <div class="about-card about-card-top">
-            <h3>Kapsam Dahilindeki Belgeler (22 Doküman)</h3>
-            <p>Sistem veri tabanında indekslenmiş temel düzenlemeler:</p>
-            <ul>
-                <li>Lisans ve Lisansüstü Eğitim-Öğretim Yönetmelikleri</li>
-                <li>Yaz Okulu Yönergesi ve Azami Süre Esasları</li>
-                <li>Çift Anadal (ÇAP) ve Yan Dal Yönergeleri</li>
-                <li>Yurtlar Yönetmeliği ve Burs/Yardım Yönergesi</li>
-                <li>Sınav Kuralları, Bütünleme ve Mazeret Esasları</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="about-card about-card-bottom">
-            <h3>Teknik Altyapı Özeti</h3>
-            <p>
-                <b>Arama Katmanı:</b> ClickHouse Vektör DB + BM25 Hibrit Geri Getirme<br>
-                <b>Sıralama (Reranker):</b> BAAI/bge-reranker-v2-m3<br>
-                <b>Üretim Modeli:</b> Groq Qwen 2.5 32B (SSE Canlı Akış Protokolü)<br>
-                <b>İstemci:</b> Streamlit Arayüzü
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("##### Veri Tabanında İndekslenen Resmi Mevzuat Envanteri (22 Doküman)")
+        st.dataframe(
+            DOCUMENT_INVENTORY,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "No": st.column_config.NumberColumn("#", width="small"),
+                "Belge Adı": st.column_config.TextColumn("Resmi Mevzuat / Yönerge Adı", width="large"),
+                "Kategori": st.column_config.TextColumn("Kategori", width="medium"),
+                "Dosya": st.column_config.TextColumn("Sistem Dosya Adı", width="medium"),
+            }
+        )
