@@ -5,13 +5,15 @@ import requests
 from pathlib import Path
 from collections import Counter
 import streamlit as st
+import os
 
 # Kök dizini yola ekle
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-API_BASE_URL = "http://127.0.0.1:8000"
+# Docker içinde "backend:8000", yerel (local) çalışmalarda "http://127.0.0.1:8000" kullanır
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 LOG_FILE_PATH = BASE_DIR / "logs" / "api_queries.jsonl"
 
 st.set_page_config(

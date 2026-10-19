@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 class ClickHouseVectorDB:
     def __init__(
         self,
-        host: str = "localhost",
+        host: str = os.getenv("CLICKHOUSE_HOST", "localhost"),
         port: int = 8123,
         username: str = "default",
         password: str = os.getenv("CLICKHOUSE_PASSWORD", "clickhouse123"),
@@ -23,6 +23,7 @@ class ClickHouseVectorDB:
             database=database
         )
         self._init_table()
+        self._auto_seed()  # <-- Tablo boşsa otomatik veri yükleme tetiklenir
 
     def _init_table(self):
         """Mevzuat parçaları ve vektörler için tabloyu oluşturur."""
@@ -40,6 +41,60 @@ class ClickHouseVectorDB:
         """
         self.client.command(ddl)
 
+    def _auto_seed(self):
+            """ClickHouse tablosu boşsa, data/processed/ altındaki işlenmiş verileri otomatik yükler."""
+            try:
+                # Tabloda kayıt var mı kontrol et
+                result = self.client.query(f"SELECT count() FROM {self.table_name}")
+                count = result.result_rows[0][0]
+                if count > 0:
+                    print(f"[Auto-Seed] ClickHouse tablosunda zaten {count} kayıt mevcut. Yükleme atlandı.")
+                    return
+
+                # İşlenmiş verilerin olası yolları (Docker içi ve lokal)
+                possible_paths = [
+                    "/app/data/processed/chunks.json",
+                    "data/processed/chunks.json",
+                    "./data/processed/chunks.json"
+                ]
+                
+                chunks_path = None
+                for p in possible_paths:
+                    if os.path.exists(p):
+                        chunks_path = p
+                        break
+                
+                if not chunks_path:
+                    print("[Auto-Seed] Uyarı: 'data/processed/chunks.json' bulunamadı, otomatik yükleme yapılamadı.")
+                    return
+
+                with open(chunks_path, "r", encoding="utf-8") as f:
+                    chunks = json.load(f)
+
+                emb_dir = os.path.dirname(chunks_path)
+                emb_path = os.path.join(emb_dir, "embeddings_e5.npz")
+                
+                if not os.path.exists(emb_path):
+                    print(f"[Auto-Seed] Uyarı: '{emb_path}' bulunamadı, embedding'ler yüklenemiyor.")
+                    return
+
+                # .npz arşivi içinden embedding'leri yükle (genellikle 'arr_0' veya benzeri bir key ile saklanır)
+                npz_data = np.load(emb_path)
+                # npz dosyası içindeki ilk array'i dinamik olarak alalım
+                key = npz_data.files[0]
+                embeddings = npz_data[key]
+
+                if len(chunks) != len(embeddings):
+                    print(f"[Auto-Seed] Hata: Chunk sayısı ({len(chunks)}) ile embedding sayısı ({len(embeddings)}) uyuşmuyor!")
+                    return
+
+                print(f"[Auto-Seed] Tablo boş! data/processed üzerinden {len(chunks)} kayıt otomatik olarak yükleniyor...")
+                self.insert_chunks(chunks, embeddings)
+                print("[Auto-Seed] Veriler ClickHouse'a başarıyla işlendi!")
+
+            except Exception as e:
+                print(f"[Auto-Seed] Otomatik yükleme sırasında hata oluştu: {e}")
+                
     def insert_chunks(self, chunks: List[Dict[str, Any]], embeddings: np.ndarray):
         """Chunk listesi ve bunlara karşılık gelen vektörleri toplu basar."""
         data = []

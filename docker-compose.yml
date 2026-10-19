@@ -1,15 +1,4 @@
 services:
-  surrealdb:
-    image: surrealdb/surrealdb:latest
-    container_name: staj_surrealdb
-    user: root
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    command: start --user root --pass root --bind 0.0.0.0:8000 surrealkv://data/database
-    volumes:
-      - surreal_data:/data
-
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: staj_clickhouse
@@ -26,6 +15,38 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
 
+  backend:
+    build: .
+    container_name: staj_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - .:/app
+      - logs_volume:/app/logs
+    depends_on:
+      - clickhouse
+
+  frontend:
+    build: .
+    container_name: staj_frontend
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    command: streamlit run app.py --server.address=0.0.0.0 --server.port=8501
+    environment:
+      - API_BASE_URL=http://backend:8000
+    volumes:
+      - .:/app
+      - logs_volume:/app/logs
+    depends_on:
+      - backend
+
 volumes:
-  surreal_data:
   clickhouse_data:
+  logs_volume:
