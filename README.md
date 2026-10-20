@@ -1,102 +1,76 @@
 # ODTÜ Mevzuat Danışmanı (RAG)
 
-ODTÜ'nün lisans ve lisansüstü yönetmeliklerini, yönergelerini ve usul-esaslarını kapsayan 22 resmî PDF dokümanı üzerinde çalışan, hibrit arama ve yeniden sıralama (reranking) tabanlı bir RAG asistanı.
+ODTÜ'nün lisans ve lisansüstü yönetmeliklerini, yönergelerini ve usul-esaslarını kapsayan resmî PDF dokümanları üzerinde çalışan, hibrit arama ve yeniden sıralama (reranking) tabanlı yapay zeka destekli bir RAG (Retrieval-Augmented Generation) asistanı.
 
-## Özellikler
+## Önemli Özellikler
 
-- **Hibrit Arama:** Dense Search ve BM25 tabanlı Sparse Search.
-- **RRF:** Farklı arama yöntemlerinden gelen sonuçları birleştirme.
-- **Reranking:** Cross-Encoder ile sonuçları yeniden sıralama.
-- **SSE Streaming:** Yanıtları gerçek zamanlı aktarma.
-- **Kapsam Filtresi:** Reranker skoru 0.10 altında kalan sorguları filtreleme.
-- **Telemetri:** Sorgu performansını JSONL formatında kaydetme.
-- **Artımlı İndeksleme:** Yeni PDF belgelerini sisteme ekleme.
+- **Hibrit Arama:** Dense Search ve BM25 tabanlı Sparse Search entegrasyonu.
+- **Yeniden Sıralama (Reranking):** Cross-Encoder ile en alakalı sonuçların filtrelenmesi.
+- **Gerçek Zamanlı Yanıt (SSE Streaming):** Groq LLM altyapısıyla akıcı yanıt aktarımı.
+- **Otomatik Tohumlama (Auto-Seed):** Docker ile ilk ayağa kalkışta verilerin ve vektörlerin veritabanına otomatik yüklenmesi.
+- **Gelişmiş Telemetri:** Sorgu performansının ve sistem metriklerinin anlık olarak kaydedilmesi.
 
 ## Teknolojiler
 
-- Python
-- Streamlit
-- FastAPI
-- ClickHouse
-- BM25
-- Groq API / Qwen
-- `intfloat/multilingual-e5-base`
-- `BAAI/bge-reranker-v2-m3`
+- **Python & FastAPI** (Backend ve API servisi)
+- **Streamlit** (Kullanıcı dostu arayüz)
+- **ClickHouse** (Yüksek performanslı vektör veritabanı)
+- **Groq API / Qwen & Multilingual-e5-base** (Dil modeli ve embedding altyapısı)
 
-## Benchmark Sonuçları
+## Kurulum ve Çalıştırma
 
-| Metrik | Sonuç |
-|---|---:|
-| Hit@4 | %80,00 |
-| MRR | %60,83 |
-| Relevance Threshold | 0.10 |
+Projeyi bilgisayarınızda (veya sunucuda) çalıştırmak için tek ihtiyacınız **Docker** ve bir **Groq API anahtarıdır**.
 
-## Kurulum
-
-### Gereksinimler
-
-- Python
-- Docker
-- Groq API anahtarı
-
-### 1. Bağımlılıkları yükleyin
+### 1. Projeyi Klonlayın
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/AlaaUTK/odtu-mevzuat-rag.git
+cd odtu-mevzuat-rag
 ```
-### 2. Ortam değişkenlerini ayarlayın
-Proje kök dizininde .env dosyası oluşturun:
-```bash
-dotenv
-GROQ_API_KEY=gsk_sizin_anahtariniz
+
+### 2. Ortam Değişkenlerini Ayarlayın
+
+Proje kök dizininde bir `.env` dosyası oluşturun ve Groq API anahtarınızı ekleyin:
+
+```env
+GROQ_API_KEY=gsk_sizin_api_anahtariniz
 CLICKHOUSE_PASSWORD=clickhouse123
 ```
-### 3. ClickHouse'u başlatın
-```bash
-docker run -d \
-  --name clickhouse-server \
-  -p 8123:8123 \
-  -p 9000:9000 \
-  --ulimit nofile=262144:262144 \
-  -e CLICKHOUSE_PASSWORD=clickhouse123 \
-  clickhouse/clickhouse-server
-```
-### 4. Backend'i başlatın
-```bash
-python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
-```
-### 5. Arayüzü başlatın
-```bash
-streamlit run app.py
-```
-Yeni Mevzuat Ekleme
-Yeni bir PDF belgesini indekslemek için:
+
+### 3. Docker ile Tek Komutta Başlatın
+
+Ekstra manuel veritabanı kurulumuna gerek kalmaksızın, sistem tüm verileriyle birlikte tek komutla ayağa kalkar:
 
 ```bash
-python scripts/ingest_new_document.py --pdf_path data/raw/yeni_yonerge.pdf
+docker compose up --build
 ```
+
+Sistem hazır olduktan sonra:
+
+- **Streamlit Arayüzü:** `http://localhost:8501` adresinden erişebilirsiniz.
+- **FastAPI Backend:** `http://localhost:8000` adresinde çalışır.
+
+## Yeni Mevzuat Ekleme
+
+Sisteme yeni bir PDF belgesi eklemek için `data/raw/` klasörüne dosyayı attıktan sonra şu komutu çalıştırabilirsiniz:
+
+```bash
+python scripts/ingest_new_document.py --pdf data/raw/yeni_yonerge.pdf
+```
+
 ## Proje Yapısı
 
 ```text
 .
-├── app.py
-├── README.md
-├── requirements.txt
+├── app.py                 # Streamlit ön yüz uygulaması
+├── Dockerfile             # Konteyner yapılandırması
+├── docker-compose.yml     # Servis orkestrasyonu
+├── requirements.txt       # Python bağımlılıkları
 ├── data/
-│   ├── raw/
-│   └── processed/
+│   ├── raw/               # Ham PDF yönetmelikler
+│   └── processed/         # İşlenmiş chunk ve embedding verileri
 ├── logs/
-│   └── api_queries.jsonl
-├── scripts/
-│   ├── evaluate_retrieval.py
-│   └── ingest_new_document.py
-└── src/
-    ├── adapters/
-    ├── api/
-    ├── llm/
-    ├── pipeline/
-    ├── retrieval/
-    └── utils/
+│   └── api_queries.jsonl  # Telemetri ve sorgu logları
+├── scripts/               # Veri işleme ve değerlendirme betikleri
+└── src/                   # Backend, LLM ve adaptör modülleri
 ```
-## Telemetri
-Sorgu gecikmesi, kaynak sayısı, reranker skoru ve işlem durumu logs/api_queries.jsonl dosyasına kaydedilir.

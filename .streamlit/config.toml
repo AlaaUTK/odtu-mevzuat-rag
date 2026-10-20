@@ -3,3 +3,11 @@ fileWatcherType = "none"
 
 [client]
 toolbarMode = "minimal"
+
+[theme]
+base = "dark"
+primaryColor = "#E63956"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#161A22"
+textColor = "#F3F4F6"
+font = "sans serif"
