@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import time
@@ -27,7 +28,6 @@ from src.api.schemas import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Uygulama başlarken RAG motorunu tek sefer yükle (Singleton)
-    # Aday sayısı candidate_k=20 olarak optimize edildi (Cross-Encoder hız kazancı)
     print("\n--- [FastAPI] RAG Motoru Yükleniyor (Singleton) ---")
     app.state.rag_engine = RAGEngine(
         candidate_k=20,
@@ -46,12 +46,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS yapılandırması
+# CORS yapılandırması (Wildcard origin ile credentials=False standart uyumluluğu)
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=("*" not in cors_origins),
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -66,6 +71,7 @@ async def health_check():
 async def query_rag(request_data: QueryRequest, request: Request):
     """
     Kullanıcı sorusunu alır, standart senkron JSON yanıtı döndürür.
+    CPU/IO yoğun işlemler asyncio.to_thread ile çalıştırılarak event loop korunur.
     """
     rag_engine: RAGEngine = request.app.state.rag_engine
     start_time = time.perf_counter()
@@ -78,7 +84,8 @@ async def query_rag(request_data: QueryRequest, request: Request):
                 for msg in request_data.chat_history
             ]
 
-        result = rag_engine.answer_query(
+        result = await asyncio.to_thread(
+            rag_engine.answer_query,
             query=request_data.query,
             source_filter=request_data.source_filter,
             chat_history=history_list
@@ -100,7 +107,6 @@ async def query_rag(request_data: QueryRequest, request: Request):
         latency_ms = (time.perf_counter() - start_time) * 1000
         top_score = sources_list[0].score if sources_list else 0.0
 
-        # Telemetri kaydı
         TelemetryLogger.log_query(
             query=request_data.query,
             rewritten_query=rewritten,
@@ -131,7 +137,7 @@ async def query_rag(request_data: QueryRequest, request: Request):
         print(f"[API Hata] /api/v1/query çalışırken hata: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Sorgu işlenirken bir sunucu hatası oluştu: {str(e)}"
+            detail="Sorgu işlenirken bir sunucu hatası oluştu."
         )
 
 
@@ -156,24 +162,30 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
         top_score = 0.0
 
         try:
-            # Durum 1: Başlangıç
+            # Durum 1: Sohbet geçmişi varsa bağlamsal sorgu çözümleme
+            if history_list:
+                yield {
+                    "event": "status",
+                    "data": json.dumps({"text": "Soru analiz ediliyor ve bağlam çözümleniyor..."}, ensure_ascii=False)
+                }
+                rewritten_final = await asyncio.to_thread(
+                    rag_engine.resolve_query,
+                    query=request_data.query,
+                    chat_history=history_list
+                )
+
+            # Durum 2: Hibrit Arama + Cross-Encoder Reranking
             yield {
                 "event": "status",
-                "data": json.dumps({"text": "🔍 Soru analiz ediliyor ve bağlam çözümleniyor..."}, ensure_ascii=False)
+                "data": json.dumps({"text": "22 ODTÜ mevzuatında hibrit arama (Dense + Sparse) yürütülüyor..."}, ensure_ascii=False)
             }
-            await asyncio.sleep(0.01)
 
-            # Durum 2: Arama
-            yield {
-                "event": "status",
-                "data": json.dumps({"text": "📚 22 ODTÜ mevzuatında hibrit arama (Dense + Sparse) yürütülüyor..."}, ensure_ascii=False)
-            }
-            await asyncio.sleep(0.01)
-
-            stream_gen, ui_sources, rewritten_query = rag_engine.answer_query_stream(
+            stream_gen, ui_sources, rewritten_query = await asyncio.to_thread(
+                rag_engine.answer_query_stream,
                 query=request_data.query,
                 source_filter=request_data.source_filter,
-                chat_history=history_list
+                chat_history=history_list,
+                pre_resolved_query=rewritten_final
             )
 
             rewritten_final = rewritten_query
@@ -194,9 +206,8 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
             # Durum 3: Yanıt üretimi
             yield {
                 "event": "status",
-                "data": json.dumps({"text": "✍️ Mevzuat hükümleri derleniyor ve yanıt yazılıyor..."}, ensure_ascii=False)
+                "data": json.dumps({"text": "Mevzuat hükümleri derleniyor ve yanıt yazılıyor..."}, ensure_ascii=False)
             }
-            await asyncio.sleep(0.01)
 
             # 2. Aşama: Token Akışı
             for token in stream_gen:
@@ -204,7 +215,7 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
                     "event": "token",
                     "data": json.dumps({"token": token}, ensure_ascii=False)
                 }
-                await asyncio.sleep(0.005)
+                await asyncio.sleep(0.002)
 
             # 3. Aşama: Akış Bitiş Olayı
             yield {
@@ -212,7 +223,6 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
                 "data": "[DONE]"
             }
 
-            # Başarılı Akış Telemetrisi
             latency_ms = (time.perf_counter() - start_time) * 1000
             TelemetryLogger.log_query(
                 query=request_data.query,
@@ -237,7 +247,7 @@ async def query_rag_stream(request_data: QueryRequest, request: Request):
             print(f"[API Stream Hata] {str(e)}")
             yield {
                 "event": "error",
-                "data": json.dumps({"error": str(e)}, ensure_ascii=False)
+                "data": json.dumps({"error": "Sorgu işlenirken bir sunucu hatası oluştu."}, ensure_ascii=False)
             }
 
     return EventSourceResponse(event_generator())

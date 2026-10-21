@@ -138,21 +138,32 @@ def classify_faq_category(query_text: str) -> str:
     return "Genel Mevzuat"
 
 
+@st.cache_resource
+def get_http_session() -> requests.Session:
+    """TCP bağlantılarını yeniden kullanmak (Keep-Alive) için kalıcı HTTP oturumu."""
+    return requests.Session()
+
+
+def _get_log_mtime() -> int:
+    """Log dosyasının son değiştirilme zamanını döndürür (önbellek anahtarı için)."""
+    try:
+        return LOG_FILE_PATH.stat().st_mtime_ns if LOG_FILE_PATH.exists() else 0
+    except Exception:
+        return 0
+
+
 def check_api_health() -> bool:
     """Backend servisinin durumunu kontrol eder."""
     try:
-        res = requests.get(f"{API_BASE_URL}/health", timeout=1.5)
+        res = get_http_session().get(f"{API_BASE_URL}/health", timeout=1.5)
         return res.status_code == 200 and res.json().get("status") == "ok"
     except Exception:
         return False
 
 
-def get_dynamic_faq():
-    """
-    Log dosyasından yalnızca mevzuat kapsamında yanıtlanmış (source_count > 0),
-    güvenli ve anlamlı sorguları analiz ederek SSS listesi oluşturur.
-    """
-    if not LOG_FILE_PATH.exists():
+@st.cache_data(show_spinner=False)
+def _cached_dynamic_faq(log_mtime: int):
+    if not log_mtime or not LOG_FILE_PATH.exists():
         return DEFAULT_FAQ_ITEMS
 
     blocked_patterns = (
@@ -259,9 +270,14 @@ def get_dynamic_faq():
     return dynamic_items
 
 
-def load_telemetry_metrics():
-    """logs/api_queries.jsonl dosyasını okuyup metrik ve özet listeyi çıkarır."""
-    if not LOG_FILE_PATH.exists():
+def get_dynamic_faq():
+    """Log dosyası değişmediği sürece önbellekten hızlıca SSS listesini döndürür."""
+    return _cached_dynamic_faq(_get_log_mtime())
+
+
+@st.cache_data(show_spinner=False)
+def _cached_telemetry_metrics(log_mtime: int):
+    if not log_mtime or not LOG_FILE_PATH.exists():
         return {
             "total_queries": 0,
             "avg_latency": 0.0,
@@ -325,6 +341,11 @@ def load_telemetry_metrics():
         "avg_score": avg_score,
         "recent_logs": recent_logs
     }
+
+
+def load_telemetry_metrics():
+    """Log dosyası değişmediği sürece önbellekten telemetri metriklerini döndürür."""
+    return _cached_telemetry_metrics(_get_log_mtime())
 
 
 # ==============================================================================
@@ -697,7 +718,7 @@ def sse_stream_generator(query: str, source_filter: str | None, history: list, r
     }
 
     try:
-        with requests.post(
+        with get_http_session().post(
             f"{API_BASE_URL}/api/v1/query/stream",
             json=payload,
             stream=True,

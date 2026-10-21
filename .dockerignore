@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+*.env
+.env.local
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.vscode/
+.idea/
+logs/*.log
+yapilan_degisiklikler.txt
+!requirements.txt

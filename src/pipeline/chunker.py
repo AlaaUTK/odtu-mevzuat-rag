@@ -9,20 +9,23 @@ ARTICLE_LABEL_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+
 def clean_text(text: str) -> str:
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n+', '\n', text)
     return text.strip()
 
+
 def extract_chunks_from_pdf(pdf_path: Path, max_words_per_chunk: int = 250, overlap_words: int = 30):
     doc = fitz.open(pdf_path)
+    total_pages = len(doc)
     doc_name = pdf_path.name
     all_chunks = []
 
     full_doc_lines = []
     page_map = []
 
-    for page_num in range(len(doc)):
+    for page_num in range(total_pages):
         text = doc[page_num].get_text("text")
         for line in text.splitlines():
             line_str = line.strip()
@@ -41,7 +44,7 @@ def extract_chunks_from_pdf(pdf_path: Path, max_words_per_chunk: int = 250, over
         if m:
             prefix = "GEÇİCİ MADDE " if "GEÇİCİ" in line.upper() else "MADDE "
             start_idx = idx
-            
+
             # Eğer bir önceki satır kısa bir başlıksa (örn: "Kontenjanlar"), o satırı da bu maddenin başına al
             if idx > 0:
                 prev_line = full_doc_lines[idx - 1]
@@ -52,14 +55,15 @@ def extract_chunks_from_pdf(pdf_path: Path, max_words_per_chunk: int = 250, over
 
     if not article_indices:
         words = " ".join(full_doc_lines).split()
-        for i in range(0, len(words), max_words_per_chunk - overlap_words):
+        step = max(1, max_words_per_chunk - overlap_words)
+        for i in range(0, len(words), step):
             chunk_text = " ".join(words[i:i + max_words_per_chunk])
             all_chunks.append({
                 "chunk_id": f"{doc_name}_1_{i}",
                 "document_name": doc_name,
                 "article": "GENEL",
                 "page_start": 1,
-                "page_end": len(doc),
+                "page_end": max(1, total_pages),
                 "text": clean_text(chunk_text)
             })
         return all_chunks
@@ -98,7 +102,7 @@ def extract_chunks_from_pdf(pdf_path: Path, max_words_per_chunk: int = 250, over
                 "text": clean_text(art_text)
             })
         else:
-            step = max_words_per_chunk - overlap_words
+            step = max(1, max_words_per_chunk - overlap_words)
             sub_id = 0
             for w_idx in range(0, len(words), step):
                 sub_words = words[w_idx:w_idx + max_words_per_chunk]
@@ -117,6 +121,7 @@ def extract_chunks_from_pdf(pdf_path: Path, max_words_per_chunk: int = 250, over
 
     return all_chunks
 
+
 def run_chunking():
     root = Path(__file__).resolve().parent.parent.parent
     raw_dir = root / "data" / "raw"
@@ -134,6 +139,7 @@ def run_chunking():
         json.dump(total_chunks, f, ensure_ascii=False, indent=2)
 
     print(f"Başarılı! Toplam chunk sayısı: {len(total_chunks)}")
+
 
 if __name__ == "__main__":
     run_chunking()
