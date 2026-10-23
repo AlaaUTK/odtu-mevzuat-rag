@@ -1,8 +1,3 @@
-# Gizli Çevre Değişkenleri ve Anahtarlar
-.env
-*.env
-.env.local
-
 # Python & Sanal Ortam
 __pycache__/
 *.py[cod]
@@ -24,6 +19,7 @@ data/chroma_db/
 surrealkv/
 clickhouse_data/
 *.npz
+!data/processed/embeddings_e5.npz
 
 # Streamlit Önbelleği
 .streamlit/secrets.toml
@@ -32,6 +28,3 @@ clickhouse_data/
 logs/*.jsonl
 logs/*.log
 *.log
-
-# İşlenmiş Veriler (İsteğe bağlı)
-data/processed/chunks.json
