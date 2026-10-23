@@ -34,9 +34,11 @@ services:
       - CLICKHOUSE_HOST=clickhouse
       - CLICKHOUSE_PASSWORD=clickhouse123
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - HF_HOME=/root/.cache/huggingface
     volumes:
       - .:/app
       - logs_volume:/app/logs
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -61,3 +63,4 @@ services:
 volumes:
   clickhouse_data:
   logs_volume:
+  hf_cache:
